@@ -1,0 +1,6 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+项目有对应的虚拟环境，进行操作前，请激活虚拟环境，使用的是powershell，请注意语法

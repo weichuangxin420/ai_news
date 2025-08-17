@@ -1,0 +1,169 @@
+# AI新闻收集与影响分析系统 - 配置模板
+# 复制此文件为 config.yaml 并填入真实配置
+
+# 新闻收集配置
+news_collection:
+  # 收集间隔（分钟）
+  collection_interval: 30
+  
+  # 新闻源配置
+  sources:
+    # RSS源
+    rss_feeds:
+      - name: "财联社RSS"
+        url: "https://rsshub.app/cls/telegraph"
+        category: "快讯"
+        enabled: true
+      - name: "格隆汇RSS"
+        url: "https://rsshub.app/gelonghui/live"
+        category: "实时"
+        enabled: true
+      - name: "雪球RSS"
+        url: "https://rsshub.app/xueqiu/hots"
+        category: "热帖"
+        enabled: true
+      - name: "新浪财经RSS"
+        url: "https://finance.sina.com.cn/roll/index.d.html?cid=56588&page=1"
+        category: "财经"
+        enabled: false  # 需要额外解析
+      - name: "测试RSS"
+        url: "https://feeds.bbci.co.uk/news/rss.xml"
+        category: "测试"
+        enabled: false  # 仅用于测试
+    
+    # API源
+    api_sources:
+      # 东方财富API（免费）
+      eastmoney:
+        base_url: "https://push2.eastmoney.com/api/qt/clist/get"
+        enabled: true
+        params:
+          np: 2
+          fltt: 1
+          invt: 2
+    
+    # 网页爬虫源
+    web_scraping:
+      - name: "新浪财经"
+        base_url: "https://finance.sina.com.cn"
+        selectors:
+          title: "h1"
+          content: ".article-content"
+        enabled: false  # 默认关闭，避免过度爬取
+        delay: 2  # 请求间隔秒数
+  
+  # 内容过滤
+  filters:
+    # A股相关关键词
+    keywords:
+      - "A股"
+      - "上证"
+      - "深证"
+      - "创业板"
+      - "科创板"
+      - "沪深"
+      - "股市"
+      - "券商"
+      - "基金"
+      - "IPO"
+      - "重组"
+      - "并购"
+      - "涨停"
+      - "跌停"
+      - "ST"
+      - "退市"
+      - "监管"
+      - "证监会"
+      - "央行"
+      - "银保监会"
+    
+    # 排除关键词
+    exclude_keywords:
+      - "测试"
+      - "demo"
+
+# AI分析配置
+ai_analysis:
+  # DeepSeek配置
+  deepseek:
+    api_key: "YOUR_DEEPSEEK_API_KEY"  # 请替换为你的DeepSeek API密钥
+    model: "deepseek-chat"
+    base_url: "https://api.deepseek.com/v1"
+    max_tokens: 2000
+    temperature: 0.1
+  
+  # 分析参数
+  analysis_params:
+    batch_size: 10  # 每批分析的新闻数量
+    timeout: 30     # 超时时间（秒）
+    retry_count: 3  # 重试次数
+
+# 邮件发送配置
+email:
+  smtp:
+    server: "smtp.163.com"  # 163邮箱SMTP服务器
+    port: 465               # 163邮箱SSL端口（推荐）或587（TLS端口）
+    username: "your_email@163.com"  # 请替换为你的163邮箱地址
+    password: "your_authorization_password"  # 请替换为你的163邮箱授权密码
+    use_tls: true          # 163邮箱支持TLS/SSL
+    use_ssl: false         # 如果使用465端口，设置为true；587端口设置为false
+  
+  # 收件人列表
+  recipients:
+    - "recipient@example.com"  # 请替换为实际收件人邮箱
+  
+  # 邮件模板
+  template:
+    subject: "📊 AI新闻分析报告 - {date}"
+    from_name: "AI新闻助手"
+
+# 数据存储配置
+database:
+  # SQLite配置
+  sqlite:
+    db_path: "data/news.db"
+    
+  # 数据保留策略
+  retention:
+    max_days: 7   # 新闻保留天数
+    cleanup_interval: 24  # 清理间隔（小时）
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "data/logs/app.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# 调度器配置
+scheduler:
+  # 分析任务间隔（分钟）- 不使用，改用完整流程
+  analysis_interval: 60
+  
+  # 完整流程间隔（分钟）- 新闻收集+AI分析+立即发送邮件
+  pipeline_interval: 30  # 每30分钟执行完整流程
+  
+  # 邮件发送计划（cron表达式）- 不使用独立邮件任务
+  email_cron: "0 9,18 * * *"  # 备用：每天9点和18点发送
+  
+  # 邮件报告包含最近几小时的分析
+  email_recent_hours: 1  # 只包含最新的分析结果
+  
+  # 错误重试配置
+  retry:
+    max_attempts: 3
+    retry_delay: 300  # 5分钟后重试
+  
+  # 任务超时配置（秒）
+  timeouts:
+    news_collection: 600    # 10分钟
+    ai_analysis: 1800      # 30分钟
+    email_sending: 300     # 5分钟
+
+# 系统配置
+system:
+  timezone: "Asia/Shanghai"
+  user_agent: "AI-News-Collector/1.0"
+  request_timeout: 30
+  max_concurrent_requests: 5 
