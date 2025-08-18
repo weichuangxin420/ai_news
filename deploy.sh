@@ -44,8 +44,16 @@ detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         if [ -f /etc/debian_version ]; then
             OS="debian"
-        elif [ -f /etc/redhat-release ]; then
+        elif [ -f /etc/redhat-release ] || [ -f /etc/centos-release ] || [ -f /etc/fedora-release ]; then
             OS="redhat"
+            # 获取具体版本信息用于调试
+            if [ -f /etc/centos-release ]; then
+                DISTRO_INFO=$(cat /etc/centos-release)
+            elif [ -f /etc/redhat-release ]; then
+                DISTRO_INFO=$(cat /etc/redhat-release)
+            elif [ -f /etc/fedora-release ]; then
+                DISTRO_INFO=$(cat /etc/fedora-release)
+            fi
         else
             OS="linux"
         fi
@@ -72,8 +80,13 @@ install_docker() {
     
     # 检查操作系统支持
     detect_os
+    if [[ "$OS" == "redhat" ]]; then
+        print_info "检测到系统: $DISTRO_INFO"
+    fi
+    
     if [[ "$OS" != "debian" && "$OS" != "redhat" ]]; then
         print_error "自动安装仅支持 Ubuntu/Debian 和 CentOS/RHEL 系统"
+        print_info "当前检测到的系统类型: $OS"
         print_info "请手动安装Docker和Docker Compose，然后重新运行脚本"
         exit 1
     fi
@@ -105,8 +118,19 @@ install_docker() {
                 apt-get install -y curl
                 ;;
             "redhat")
-                yum update -y
-                yum install -y curl
+                # 检测是否使用dnf或yum
+                if command -v dnf &> /dev/null; then
+                    print_info "检测到dnf包管理器 (CentOS 8+/RHEL 8+/Fedora)"
+                    dnf update -y
+                    dnf install -y curl
+                elif command -v yum &> /dev/null; then
+                    print_info "检测到yum包管理器 (CentOS 7/RHEL 7)"
+                    yum update -y
+                    yum install -y curl
+                else
+                    print_error "未找到dnf或yum包管理器"
+                    exit 1
+                fi
                 ;;
         esac
         

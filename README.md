@@ -477,7 +477,10 @@ sudo apt update
 sudo apt install python3 python3-pip python3-venv git
 
 # CentOS/RHEL
-sudo yum install python3 python3-pip git
+# CentOS 8+/RHEL 8+ 使用 dnf
+sudo dnf install python3 python3-pip git
+# CentOS 7/RHEL 7 使用 yum
+# sudo yum install python3 python3-pip git
 
 # 检查Python版本（需要3.8+）
 python3 --version
