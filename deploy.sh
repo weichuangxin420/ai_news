@@ -5,6 +5,9 @@
 
 set -e
 
+# 捕获Ctrl+C中断信号
+trap 'echo -e "\n${YELLOW}⚠️  检查被用户中断${NC}"; exit 130' INT
+
 # 颜色输出
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -159,6 +162,16 @@ install_docker() {
 # 系统兼容性检查
 check_system_compatibility() {
     print_step "🔍 系统兼容性检查..."
+    
+    # 检查是否跳过网络测试
+    SKIP_NETWORK_CHECK="${2:-false}"
+    if [[ "$SKIP_NETWORK_CHECK" == "--skip-network" ]]; then
+        print_warning "⚠️  跳过网络连接检查"
+        SKIP_NETWORK_CHECK=true
+    else
+        SKIP_NETWORK_CHECK=false
+    fi
+    
     echo ""
     
     # 检测操作系统信息
@@ -247,25 +260,43 @@ check_system_compatibility() {
     fi
     
     # 检测网络连接
-    echo ""
-    print_info "=== 网络连接检测 ==="
-    
-    # 测试关键网络连接
-    networks=(
-        "GitHub:https://github.com"
-        "Docker Hub:https://registry-1.docker.io"
-        "Docker安装:https://get.docker.com"
-    )
-    
-    for network in "${networks[@]}"; do
-        name="${network%:*}"
-        url="${network#*:}"
-        if curl -s --connect-timeout 5 "$url" &> /dev/null; then
-            print_message "✅ $name 连接: 正常"
-        else
-            print_warning "⚠️  $name 连接: 失败"
-        fi
-    done
+    if [[ "$SKIP_NETWORK_CHECK" == "false" ]]; then
+        echo ""
+        print_info "=== 网络连接检测 ==="
+        print_info "ℹ️  网络检查可能需要几秒钟，如需跳过请使用: $0 check --skip-network"
+        
+        # 测试关键网络连接
+        networks=(
+            "GitHub:https://github.com"
+            "Docker Hub:https://registry-1.docker.io"
+            "Docker安装:https://get.docker.com"
+        )
+        
+        for network in "${networks[@]}"; do
+            name="${network%:*}"
+            url="${network#*:}"
+            print_info "正在测试 $name 连接..."
+            
+            # 使用timeout命令限制最大等待时间，如果没有timeout命令则使用curl的超时参数
+            if command -v timeout &> /dev/null; then
+                if timeout 3 curl -s --connect-timeout 3 --max-time 5 "$url" &> /dev/null; then
+                    print_message "✅ $name 连接: 正常"
+                else
+                    print_warning "⚠️  $name 连接: 失败 (3秒超时)"
+                fi
+            else
+                # 没有timeout命令时，使用curl的超时参数
+                if curl -s --connect-timeout 3 --max-time 5 "$url" &> /dev/null; then
+                    print_message "✅ $name 连接: 正常"
+                else
+                    print_warning "⚠️  $name 连接: 失败 (5秒超时)"
+                fi
+            fi
+        done
+    else
+        echo ""
+        print_warning "⚠️  已跳过网络连接检测"
+    fi
     
     # 模拟操作系统检测
     echo ""
@@ -504,6 +535,7 @@ show_help() {
     echo "🔧 环境管理:"
     echo "  install   - 自动安装Docker环境 (需要sudo权限)"
     echo "  check     - 检查系统兼容性和环境状态"
+    echo "              可选参数: --skip-network (跳过网络检查)"
     echo ""
     echo "🚀 服务管理:"
     echo "  build     - 构建Docker镜像"
@@ -536,7 +568,7 @@ show_help() {
 main() {
     case "${1:-help}" in
         check)
-            check_system_compatibility
+            check_system_compatibility "$@"
             ;;
         install)
             install_docker
