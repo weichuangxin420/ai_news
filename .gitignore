@@ -53,4 +53,5 @@ Thumbs.db
 
 # 分析报告（本地生成）
 *_report_*.md
-*_analysis_*.md 
+*_analysis_*.md
+source_check_result_*.txt 
