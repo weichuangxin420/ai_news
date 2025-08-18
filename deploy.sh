@@ -263,7 +263,7 @@ check_system_compatibility() {
     if [[ "$SKIP_NETWORK_CHECK" == "false" ]]; then
         echo ""
         print_info "=== 网络连接检测 ==="
-        print_info "ℹ️  网络检查可能需要几秒钟，如需跳过请使用: $0 check --skip-network"
+        print_info "ℹ️  网络检查可能需要1-2分钟，如需跳过请使用: $0 check --skip-network"
         
         # 测试关键网络连接
         networks=(
@@ -279,17 +279,17 @@ check_system_compatibility() {
             
             # 使用timeout命令限制最大等待时间，如果没有timeout命令则使用curl的超时参数
             if command -v timeout &> /dev/null; then
-                if timeout 3 curl -s --connect-timeout 3 --max-time 5 "$url" &> /dev/null; then
+                if timeout 60 curl -s --connect-timeout 30 --max-time 60 "$url" &> /dev/null; then
                     print_message "✅ $name 连接: 正常"
                 else
-                    print_warning "⚠️  $name 连接: 失败 (3秒超时)"
+                    print_warning "⚠️  $name 连接: 失败 (60秒超时)"
                 fi
             else
                 # 没有timeout命令时，使用curl的超时参数
-                if curl -s --connect-timeout 3 --max-time 5 "$url" &> /dev/null; then
+                if curl -s --connect-timeout 30 --max-time 60 "$url" &> /dev/null; then
                     print_message "✅ $name 连接: 正常"
                 else
-                    print_warning "⚠️  $name 连接: 失败 (5秒超时)"
+                    print_warning "⚠️  $name 连接: 失败 (60秒超时)"
                 fi
             fi
         done
