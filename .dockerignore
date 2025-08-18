@@ -1,0 +1,81 @@
+# Docker相关文件
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Git相关
+.git
+.gitignore
+
+# Python缓存和虚拟环境
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+.env/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 日志文件（运行时动态生成）
+*.log
+logs/
+data/logs/
+
+# 数据库文件（运行时动态生成）
+*.db
+*.sqlite
+*.sqlite3
+data/database/
+
+# 生成的报告文件
+data/reports/
+reports/
+
+# 测试文件
+tests/
+*_test.py
+test_*.py
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.temp
+
+# 文档（可选，如果不需要在容器中）
+# *.md
+# docs/
+
+# 配置模板（实际配置已挂载）
+config/*.template
+config/*.example
+
+# Jupyter笔记本
+*.ipynb
+.ipynb_checkpoints/
+
+# Coverage报告
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml 

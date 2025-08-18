@@ -46,6 +46,32 @@ ai_news/
 
 ## 🚀 快速开始
 
+### 方式1: Docker部署（推荐）
+
+如果你有Docker环境，可以使用Docker一键部署：
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/yourusername/ai_news.git
+cd ai_news
+
+# 2. 配置应用
+cp config/config.yaml.template config/config.yaml
+# 编辑config/config.yaml，填入你的API密钥和邮箱信息
+
+# 3. 一键部署
+docker-compose build
+docker-compose up -d
+
+# 4. 查看状态
+docker-compose ps
+docker-compose logs -f
+```
+
+> 📖 **详细的Docker部署说明请参考**: [DOCKER_DEPLOY.md](./DOCKER_DEPLOY.md)
+
+### 方式2: 传统部署
+
 ### 1. 环境准备
 
 确保你的系统已安装 Python 3.8+：
@@ -360,6 +386,58 @@ class AnalysisResult:
 - 数据库会自动清理30天前的旧数据
 - 日志文件会自动轮转，避免占用过多磁盘空间
 - 并发数量可通过配置文件调整
+
+## 📦 部署说明
+
+### 🐳 Docker部署（推荐）
+
+Docker部署是最简单和最可靠的部署方式：
+
+```bash
+# 快速启动
+docker-compose up -d
+
+# 查看状态
+./deploy.sh status    # Linux/macOS
+docker-compose ps     # Windows
+
+# 管理服务
+./deploy.sh start|stop|restart|logs    # Linux/macOS
+docker-compose start|stop|restart      # Windows
+```
+
+**优势**:
+- ✅ 环境隔离，避免依赖冲突
+- ✅ 一键部署，简化运维
+- ✅ 自动重启，故障恢复
+- ✅ 资源限制，防止系统过载
+- ✅ 数据持久化，安全可靠
+
+> 📖 **完整的Docker部署指南**: [DOCKER_DEPLOY.md](./DOCKER_DEPLOY.md)
+
+### 🖥️ 传统部署
+
+对于不使用Docker的环境，可以使用传统方式部署：
+
+```bash
+# 1. 安装Python依赖
+pip install -r requirements.txt
+
+# 2. 配置应用
+cp config/config.yaml.template config/config.yaml
+# 编辑配置文件
+
+# 3. 启动服务
+python main.py scheduler-run
+```
+
+### 🚀 生产环境建议
+
+- **Docker部署**: 推荐用于生产环境，便于管理和扩展
+- **资源监控**: 使用 `docker stats` 监控资源使用情况
+- **日志管理**: 配置日志轮转，避免磁盘空间不足
+- **备份策略**: 定期备份配置文件和数据库
+- **安全考虑**: 使用防火墙限制不必要的端口访问
 
 ## 🛠️ 开发和扩展
 
