@@ -387,57 +387,336 @@ class AnalysisResult:
 - 日志文件会自动轮转，避免占用过多磁盘空间
 - 并发数量可通过配置文件调整
 
-## 📦 部署说明
+## 📦 完整部署指南
+
+### 📋 部署方式选择
+
+| 部署方式 | 适用场景 | 难度 | 推荐指数 |
+|---------|---------|------|---------|
+| 🐳 Docker部署 | 开发、生产环境 | ⭐ | ⭐⭐⭐⭐⭐ |
+| 🖥️ 传统部署 | 特殊环境需求 | ⭐⭐⭐ | ⭐⭐⭐ |
 
 ### 🐳 Docker部署（推荐）
 
-Docker部署是最简单和最可靠的部署方式：
+#### 系统要求
+- **最低配置**: 1核CPU + 1GB内存 + 5GB存储
+- **推荐配置**: 2核CPU + 2GB内存 + 10GB存储
+- **环境要求**: Docker 20.10+ 和 Docker Compose 1.29+
 
+#### 快速开始
 ```bash
-# 快速启动
-docker-compose up -d
+# 1. 克隆项目
+git clone https://github.com/yourusername/ai_news.git
+cd ai_news
 
-# 查看状态
-./deploy.sh status    # Linux/macOS
-docker-compose ps     # Windows
+# 2. 安装Docker环境（首次部署）
+sudo ./deploy.sh install
 
-# 管理服务
-./deploy.sh start|stop|restart|logs    # Linux/macOS
-docker-compose start|stop|restart      # Windows
+# 3. 配置应用
+cp config/config.yaml.template config/config.yaml
+# 编辑config/config.yaml，填入API密钥和邮箱信息
+
+# 4. 构建和启动
+./deploy.sh build
+./deploy.sh start
 ```
 
-**优势**:
-- ✅ 环境隔离，避免依赖冲突
-- ✅ 一键部署，简化运维
-- ✅ 自动重启，故障恢复
-- ✅ 资源限制，防止系统过载
-- ✅ 数据持久化，安全可靠
+#### 服务管理命令
+```bash
+# 🔧 环境管理
+sudo ./deploy.sh install    # 安装Docker环境
 
-> 📖 **完整的Docker部署指南**: [DOCKER_DEPLOY.md](./DOCKER_DEPLOY.md)
+# 🚀 服务管理
+./deploy.sh build          # 构建镜像
+./deploy.sh start          # 启动服务
+./deploy.sh stop           # 停止服务
+./deploy.sh restart        # 重启服务
+./deploy.sh status         # 查看状态
+./deploy.sh logs           # 查看日志
+
+# 🛠️ 维护操作
+./deploy.sh update         # 更新服务
+./deploy.sh backup         # 备份数据
+./deploy.sh clean          # 清理资源
+
+# 📊 监控命令
+docker stats ai_news_app   # 查看资源使用
+docker-compose ps          # 查看容器状态
+```
+
+#### Docker环境安装
+如果系统没有Docker，脚本会自动安装：
+
+**Ubuntu/Debian**:
+```bash
+sudo ./deploy.sh install
+```
+
+**手动安装Docker**:
+```bash
+# 安装Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# 安装Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+```
+
+**Windows用户**:
+1. 下载并安装 [Docker Desktop](https://www.docker.com/products/docker-desktop)
+2. 启动Docker Desktop，确保WSL2后端已启用
+3. 使用PowerShell运行：`docker-compose build && docker-compose up -d`
 
 ### 🖥️ 传统部署
 
-对于不使用Docker的环境，可以使用传统方式部署：
-
+#### 环境准备
 ```bash
-# 1. 安装Python依赖
+# Ubuntu/Debian
+sudo apt update
+sudo apt install python3 python3-pip python3-venv git
+
+# CentOS/RHEL
+sudo yum install python3 python3-pip git
+
+# 检查Python版本（需要3.8+）
+python3 --version
+```
+
+#### 安装步骤
+```bash
+# 1. 克隆项目
+git clone https://github.com/yourusername/ai_news.git
+cd ai_news
+
+# 2. 创建虚拟环境
+python3 -m venv venv
+source venv/bin/activate  # Linux/macOS
+# venv\Scripts\activate   # Windows
+
+# 3. 安装依赖
 pip install -r requirements.txt
 
-# 2. 配置应用
+# 4. 配置应用
 cp config/config.yaml.template config/config.yaml
-# 编辑配置文件
+# 编辑config/config.yaml文件
 
-# 3. 启动服务
+# 5. 创建数据目录
+mkdir -p data/logs data/database data/reports
+
+# 6. 测试运行
+python main.py test
+python main.py collect
+python main.py analyze
+
+# 7. 启动服务
 python main.py scheduler-run
 ```
 
-### 🚀 生产环境建议
+#### 系统服务配置（生产环境）
+```bash
+# 创建systemd服务文件
+sudo vim /etc/systemd/system/ai-news.service
+```
 
-- **Docker部署**: 推荐用于生产环境，便于管理和扩展
-- **资源监控**: 使用 `docker stats` 监控资源使用情况
-- **日志管理**: 配置日志轮转，避免磁盘空间不足
-- **备份策略**: 定期备份配置文件和数据库
-- **安全考虑**: 使用防火墙限制不必要的端口访问
+```ini
+[Unit]
+Description=AI News Collection and Analysis Service
+After=network.target
+
+[Service]
+Type=simple
+User=your_user
+Group=your_group
+WorkingDirectory=/path/to/ai_news
+Environment=PATH=/path/to/ai_news/venv/bin
+ExecStart=/path/to/ai_news/venv/bin/python main.py scheduler-run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# 启用服务
+sudo systemctl daemon-reload
+sudo systemctl enable ai-news.service
+sudo systemctl start ai-news.service
+```
+
+### ⚙️ 配置说明
+
+#### 必需配置项
+在 `config/config.yaml` 中需要配置：
+
+```yaml
+# DeepSeek API配置
+ai_analysis:
+  deepseek:
+    api_key: "your_deepseek_api_key"
+
+# 邮箱配置
+email:
+  smtp:
+    username: "your_email@163.com"
+    password: "your_auth_password"
+  recipients:
+    - "recipient@example.com"
+```
+
+#### 性能优化配置
+```yaml
+# 并发设置
+news_collection:
+  concurrent_limit: 10      # 并发请求数
+  request_timeout: 30       # 请求超时时间
+
+# 调度设置
+scheduler:
+  pipeline_interval: 30     # 执行间隔（分钟）
+  email_recent_hours: 1     # 邮件包含最近几小时的分析
+
+# 数据管理
+database:
+  retention:
+    max_days: 7             # 数据保留天数
+```
+
+### 🔍 故障排除
+
+#### 常见问题解决
+
+**1. Docker容器启动失败**
+```bash
+# 检查日志
+docker-compose logs ai-news
+
+# 重新构建
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+**2. 网络连接问题**
+```bash
+# 测试API连接
+curl -I https://api.deepseek.com
+curl -I https://smtp.163.com:465
+
+# 检查防火墙
+sudo ufw status
+```
+
+**3. 邮件发送失败**
+```bash
+# 测试SMTP连接
+python main.py email-test
+
+# 163邮箱设置检查
+# 1. 开启SMTP服务
+# 2. 获取授权密码（不是登录密码）
+# 3. 确认端口设置正确
+```
+
+**4. 权限问题**
+```bash
+# 检查文件权限
+ls -la config/config.yaml
+ls -la data/
+
+# 修复权限
+chmod 644 config/config.yaml
+sudo chown -R $USER:$USER data/
+```
+
+### 📊 监控与维护
+
+#### 性能监控
+```bash
+# 系统资源
+htop
+df -h
+free -h
+
+# Docker资源
+docker stats
+docker system df
+
+# 应用日志
+tail -f data/logs/app.log
+```
+
+#### 数据备份
+```bash
+# 使用脚本备份
+./deploy.sh backup
+
+# 手动备份
+tar -czf backup_$(date +%Y%m%d_%H%M%S).tar.gz data/ config/config.yaml
+```
+
+#### 定期维护
+```bash
+# 更新系统
+./deploy.sh update
+
+# 清理资源
+docker system prune -f
+
+# 检查磁盘空间
+df -h
+```
+
+### 🔒 安全建议
+
+1. **网络安全**
+   - 配置防火墙，只开放必要端口
+   - 使用SSH密钥认证
+   - 禁用root直接登录
+
+2. **应用安全**
+   - 定期更新系统和依赖包
+   - 使用强密码和API密钥
+   - 限制配置文件权限：`chmod 600 config/config.yaml`
+
+3. **数据安全**
+   - 定期备份配置和数据
+   - 监控异常访问
+   - 使用HTTPS连接
+
+### 🚀 生产环境部署
+
+#### 推荐架构
+- **Docker部署**: 便于管理和扩展
+- **反向代理**: 使用Nginx处理外部访问
+- **监控系统**: 配置日志聚合和告警
+- **备份策略**: 自动化数据备份
+
+#### 容器资源限制
+```yaml
+# docker-compose.yml
+deploy:
+  resources:
+    limits:
+      cpus: '2.0'
+      memory: 2G
+    reservations:
+      cpus: '0.5'
+      memory: 512M
+```
+
+#### 更新策略
+```bash
+# Docker部署更新
+git pull
+./deploy.sh update
+
+# 传统部署更新
+git pull
+source venv/bin/activate
+pip install -r requirements.txt
+systemctl restart ai-news
+```
 
 ## 🛠️ 开发和扩展
 

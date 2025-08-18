@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # AI新闻收集系统 - Docker部署脚本
-# 使用方法: ./deploy.sh [build|start|stop|restart|status|logs|clean|update]
+# 使用方法: ./deploy.sh [install|build|start|stop|restart|status|logs|clean|update|backup]
 
 set -e
 
@@ -10,6 +10,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
 # 项目配置
@@ -19,30 +20,129 @@ IMAGE_NAME="ai_news"
 
 # 打印带颜色的消息
 print_message() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}"
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] ✅ $1${NC}"
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING] $1${NC}"
+    echo -e "${YELLOW}[WARNING] ⚠️  $1${NC}"
 }
 
 print_error() {
-    echo -e "${RED}[ERROR] $1${NC}"
+    echo -e "${RED}[ERROR] ❌ $1${NC}"
 }
 
 print_info() {
-    echo -e "${BLUE}[INFO] $1${NC}"
+    echo -e "${BLUE}[INFO] ℹ️  $1${NC}"
+}
+
+print_step() {
+    echo -e "${PURPLE}[STEP] 🚀 $1${NC}"
+}
+
+# 检测操作系统
+detect_os() {
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if [ -f /etc/debian_version ]; then
+            OS="debian"
+        elif [ -f /etc/redhat-release ]; then
+            OS="redhat"
+        else
+            OS="linux"
+        fi
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS="macos"
+    elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+        OS="windows"
+    else
+        OS="unknown"
+    fi
+}
+
+# 安装Docker（仅Linux）
+install_docker() {
+    print_step "检查并安装Docker环境..."
+    
+    # 检查是否已安装
+    if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; then
+        print_message "Docker环境已就绪"
+        print_info "Docker版本: $(docker --version)"
+        print_info "Docker Compose版本: $(docker-compose --version)"
+        return 0
+    fi
+    
+    # 检查操作系统支持
+    detect_os
+    if [[ "$OS" != "debian" && "$OS" != "redhat" ]]; then
+        print_error "自动安装仅支持 Ubuntu/Debian 和 CentOS/RHEL 系统"
+        print_info "请手动安装Docker和Docker Compose，然后重新运行脚本"
+        exit 1
+    fi
+    
+    # 检查权限
+    if [ "$EUID" -ne 0 ]; then
+        print_error "安装Docker需要root权限"
+        print_info "请使用: sudo $0 install"
+        exit 1
+    fi
+    
+    print_warning "即将自动安装Docker，是否继续? (y/N)"
+    read -r response
+    case "$response" in
+        [yY][eE][sS]|[yY]) 
+            ;;
+        *)
+            print_info "取消安装，请手动安装Docker后重试"
+            exit 0
+            ;;
+    esac
+    
+    # 安装Docker
+    if ! command -v docker &> /dev/null; then
+        print_step "安装Docker..."
+        case $OS in
+            "debian")
+                apt-get update -y
+                apt-get install -y curl
+                ;;
+            "redhat")
+                yum update -y
+                yum install -y curl
+                ;;
+        esac
+        
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+        
+        systemctl enable docker
+        systemctl start docker
+        print_message "Docker安装完成"
+    fi
+    
+    # 安装Docker Compose
+    if ! command -v docker-compose &> /dev/null; then
+        print_step "安装Docker Compose..."
+        COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d\" -f4)
+        curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+        ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+        print_message "Docker Compose安装完成"
+    fi
+    
+    print_message "Docker环境安装成功！"
 }
 
 # 检查Docker是否安装
 check_docker() {
     if ! command -v docker &> /dev/null; then
-        print_error "Docker未安装，请先安装Docker"
+        print_error "Docker未安装"
+        print_info "运行以下命令自动安装: sudo $0 install"
         exit 1
     fi
     
     if ! command -v docker-compose &> /dev/null; then
-        print_error "Docker Compose未安装，请先安装Docker Compose"
+        print_error "Docker Compose未安装"
+        print_info "运行以下命令自动安装: sudo $0 install"
         exit 1
     fi
 }
@@ -50,9 +150,26 @@ check_docker() {
 # 检查配置文件
 check_config() {
     if [ ! -f "config/config.yaml" ]; then
-        print_error "配置文件不存在: config/config.yaml"
-        print_info "请复制 config/config.yaml.template 并填写正确的配置"
-        exit 1
+        if [ -f "config/config.yaml.template" ]; then
+            print_warning "配置文件不存在，是否从模板创建? (y/N)"
+            read -r response
+            case "$response" in
+                [yY][eE][sS]|[yY]) 
+                    cp config/config.yaml.template config/config.yaml
+                    print_message "配置文件已创建: config/config.yaml"
+                    print_warning "请编辑配置文件填入必要信息后重新运行"
+                    exit 0
+                    ;;
+                *)
+                    print_error "配置文件不存在: config/config.yaml"
+                    print_info "请复制 config/config.yaml.template 并填写正确的配置"
+                    exit 1
+                    ;;
+            esac
+        else
+            print_error "配置文件和模板都不存在"
+            exit 1
+        fi
     fi
     print_message "配置文件检查通过"
 }
@@ -164,8 +281,8 @@ backup_data() {
     print_message "备份数据到 $BACKUP_DIR..."
     
     mkdir -p $BACKUP_DIR
-    cp -r data/ $BACKUP_DIR/
-    cp config/config.yaml $BACKUP_DIR/
+    cp -r data/ $BACKUP_DIR/ 2>/dev/null || print_warning "data目录不存在，跳过"
+    cp config/config.yaml $BACKUP_DIR/ 2>/dev/null || print_warning "配置文件不存在，跳过"
     
     print_message "数据备份完成: $BACKUP_DIR"
 }
@@ -176,55 +293,75 @@ show_help() {
     echo ""
     echo "使用方法: $0 [命令]"
     echo ""
-    echo "可用命令:"
+    echo "🔧 环境管理:"
+    echo "  install   - 自动安装Docker环境 (需要sudo权限)"
+    echo ""
+    echo "🚀 服务管理:"
     echo "  build     - 构建Docker镜像"
     echo "  start     - 启动服务"
     echo "  stop      - 停止服务"
     echo "  restart   - 重启服务"
     echo "  status    - 显示服务状态"
     echo "  logs      - 显示服务日志"
-    echo "  clean     - 清理所有Docker资源"
+    echo ""
+    echo "🛠️  维护操作:"
     echo "  update    - 更新并重启服务"
     echo "  backup    - 备份数据"
+    echo "  clean     - 清理所有Docker资源"
     echo "  help      - 显示此帮助信息"
     echo ""
-    echo "示例:"
-    echo "  $0 build     # 构建镜像"
-    echo "  $0 start     # 启动服务"
-    echo "  $0 logs      # 查看日志"
+    echo "📝 使用示例:"
+    echo "  sudo $0 install    # 首次安装Docker环境"
+    echo "  $0 build          # 构建镜像"
+    echo "  $0 start          # 启动服务"
+    echo "  $0 logs           # 查看日志"
+    echo ""
+    echo "💡 快速开始:"
+    echo "  1. sudo $0 install"
+    echo "  2. 编辑 config/config.yaml 配置文件"
+    echo "  3. $0 build && $0 start"
 }
 
 # 主函数
 main() {
-    check_docker
-    
     case "${1:-help}" in
+        install)
+            install_docker
+            ;;
         build)
+            check_docker
             check_config
             create_directories
             build_image
             ;;
         start)
+            check_docker
             check_config
             create_directories
             start_service
             ;;
         stop)
+            check_docker
             stop_service
             ;;
         restart)
+            check_docker
             restart_service
             ;;
         status)
+            check_docker
             show_status
             ;;
         logs)
+            check_docker
             show_logs
             ;;
         clean)
+            check_docker
             clean_resources
             ;;
         update)
+            check_docker
             update_service
             ;;
         backup)
