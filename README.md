@@ -409,14 +409,17 @@ class AnalysisResult:
 git clone https://github.com/yourusername/ai_news.git
 cd ai_news
 
-# 2. 安装Docker环境（首次部署）
+# 2. 检查系统兼容性
+./deploy.sh check
+
+# 3. 安装Docker环境（首次部署）
 sudo ./deploy.sh install
 
-# 3. 配置应用
+# 4. 配置应用
 cp config/config.yaml.template config/config.yaml
 # 编辑config/config.yaml，填入API密钥和邮箱信息
 
-# 4. 构建和启动
+# 5. 构建和启动
 ./deploy.sh build
 ./deploy.sh start
 ```
@@ -424,7 +427,8 @@ cp config/config.yaml.template config/config.yaml
 #### 服务管理命令
 ```bash
 # 🔧 环境管理
-sudo ./deploy.sh install    # 安装Docker环境
+./deploy.sh check          # 检查系统兼容性
+sudo ./deploy.sh install   # 安装Docker环境
 
 # 🚀 服务管理
 ./deploy.sh build          # 构建镜像

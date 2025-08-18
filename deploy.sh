@@ -156,6 +156,190 @@ install_docker() {
     print_message "Docker环境安装成功！"
 }
 
+# 系统兼容性检查
+check_system_compatibility() {
+    print_step "🔍 系统兼容性检查..."
+    echo ""
+    
+    # 检测操作系统信息
+    print_info "=== 系统信息 ==="
+    echo "OSTYPE: $OSTYPE"
+    
+    if [ -f /etc/os-release ]; then
+        echo "操作系统详情:"
+        cat /etc/os-release | head -5
+    fi
+    
+    if [ -f /etc/redhat-release ]; then
+        echo "RedHat系统: $(cat /etc/redhat-release)"
+    fi
+    
+    if [ -f /etc/centos-release ]; then
+        echo "CentOS系统: $(cat /etc/centos-release)"
+    fi
+    
+    # 检测包管理器
+    echo ""
+    print_info "=== 包管理器检测 ==="
+    
+    if command -v dnf &> /dev/null; then
+        print_message "✅ 找到 dnf: $(dnf --version 2>/dev/null | head -1 || echo "已安装")"
+    else
+        print_warning "⚠️  未找到 dnf"
+    fi
+    
+    if command -v yum &> /dev/null; then
+        print_message "✅ 找到 yum: $(yum --version 2>/dev/null | head -1 || echo "已安装")"
+    else
+        print_warning "⚠️  未找到 yum"
+    fi
+    
+    if command -v apt-get &> /dev/null; then
+        print_message "✅ 找到 apt-get: $(apt-get --version 2>/dev/null | head -1 || echo "已安装")"
+    else
+        print_warning "⚠️  未找到 apt-get"
+    fi
+    
+    # 检测系统工具
+    echo ""
+    print_info "=== 系统工具检测 ==="
+    
+    tools=("curl" "wget" "git" "systemctl")
+    missing_tools=()
+    
+    for tool in "${tools[@]}"; do
+        if command -v $tool &> /dev/null; then
+            print_message "✅ $tool: $(command -v $tool)"
+        else
+            print_warning "⚠️  $tool: 未安装"
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    # 检测Docker环境
+    echo ""
+    print_info "=== Docker环境检测 ==="
+    
+    if command -v docker &> /dev/null; then
+        print_message "✅ Docker: $(docker --version)"
+        
+        # 检查Docker服务状态
+        if systemctl is-active --quiet docker 2>/dev/null; then
+            print_message "✅ Docker服务: 运行中"
+        else
+            print_warning "⚠️  Docker服务: 未运行"
+        fi
+        
+        # 检查Docker权限
+        if docker ps &> /dev/null; then
+            print_message "✅ Docker权限: 正常"
+        else
+            print_warning "⚠️  Docker权限: 需要sudo或将用户加入docker组"
+        fi
+    else
+        print_warning "⚠️  Docker: 未安装"
+    fi
+    
+    if command -v docker-compose &> /dev/null; then
+        print_message "✅ Docker Compose: $(docker-compose --version)"
+    else
+        print_warning "⚠️  Docker Compose: 未安装"
+    fi
+    
+    # 检测网络连接
+    echo ""
+    print_info "=== 网络连接检测 ==="
+    
+    # 测试关键网络连接
+    networks=(
+        "GitHub:https://github.com"
+        "Docker Hub:https://registry-1.docker.io"
+        "Docker安装:https://get.docker.com"
+    )
+    
+    for network in "${networks[@]}"; do
+        name="${network%:*}"
+        url="${network#*:}"
+        if curl -s --connect-timeout 5 "$url" &> /dev/null; then
+            print_message "✅ $name 连接: 正常"
+        else
+            print_warning "⚠️  $name 连接: 失败"
+        fi
+    done
+    
+    # 模拟操作系统检测
+    echo ""
+    print_info "=== 部署兼容性检测 ==="
+    
+    detect_os
+    echo "检测结果: OS=$OS"
+    
+    if [[ "$OS" == "redhat" ]]; then
+        if [[ -n "$DISTRO_INFO" ]]; then
+            echo "发行版信息: $DISTRO_INFO"
+        fi
+        print_message "✅ CentOS/RHEL系统 - 完全兼容"
+    elif [[ "$OS" == "debian" ]]; then
+        print_message "✅ Ubuntu/Debian系统 - 完全兼容"
+    else
+        print_warning "⚠️  未知系统类型 - 可能需要手动安装"
+    fi
+    
+    # 检查权限
+    echo ""
+    print_info "=== 权限检测 ==="
+    
+    if [ "$EUID" -eq 0 ]; then
+        print_message "✅ 当前用户: root (可直接安装Docker)"
+    else
+        print_warning "⚠️  当前用户: $(whoami) (安装Docker需要sudo权限)"
+        
+        if sudo -n true 2>/dev/null; then
+            print_message "✅ sudo权限: 可用 (无需密码)"
+        else
+            print_info "ℹ️  sudo权限: 需要密码验证"
+        fi
+    fi
+    
+    # 总结和建议
+    echo ""
+    print_info "=== 检查总结 ==="
+    
+    if [[ "$OS" == "redhat" ]] || [[ "$OS" == "debian" ]]; then
+        print_message "🎉 系统兼容性检查通过！"
+        echo ""
+        print_info "📋 建议的后续步骤:"
+        
+        if ! command -v docker &> /dev/null; then
+            echo "1. sudo $0 install           # 安装Docker环境"
+        else
+            echo "1. Docker已安装，跳过安装步骤"
+        fi
+        
+        echo "2. cp config/config.yaml.template config/config.yaml"
+        echo "3. 编辑config/config.yaml配置文件"
+        echo "4. $0 build                   # 构建镜像"
+        echo "5. $0 start                   # 启动服务"
+        
+        if [[ ${#missing_tools[@]} -gt 0 ]]; then
+            echo ""
+            print_warning "⚠️  缺失工具建议安装:"
+            if [[ "$OS" == "redhat" ]]; then
+                if command -v dnf &> /dev/null; then
+                    echo "sudo dnf install ${missing_tools[*]}"
+                else
+                    echo "sudo yum install ${missing_tools[*]}"
+                fi
+            else
+                echo "sudo apt-get install ${missing_tools[*]}"
+            fi
+        fi
+    else
+        print_error "❌ 当前系统可能不完全兼容"
+        print_info "建议手动安装Docker和Docker Compose"
+    fi
+}
+
 # 检查Docker是否安装
 check_docker() {
     if ! command -v docker &> /dev/null; then
@@ -319,6 +503,7 @@ show_help() {
     echo ""
     echo "🔧 环境管理:"
     echo "  install   - 自动安装Docker环境 (需要sudo权限)"
+    echo "  check     - 检查系统兼容性和环境状态"
     echo ""
     echo "🚀 服务管理:"
     echo "  build     - 构建Docker镜像"
@@ -341,14 +526,18 @@ show_help() {
     echo "  $0 logs           # 查看日志"
     echo ""
     echo "💡 快速开始:"
-    echo "  1. sudo $0 install"
-    echo "  2. 编辑 config/config.yaml 配置文件"
-    echo "  3. $0 build && $0 start"
+    echo "  1. $0 check               # 检查系统兼容性"
+    echo "  2. sudo $0 install        # 安装Docker环境"
+    echo "  3. 编辑 config/config.yaml 配置文件"
+    echo "  4. $0 build && $0 start    # 构建并启动服务"
 }
 
 # 主函数
 main() {
     case "${1:-help}" in
+        check)
+            check_system_compatibility
+            ;;
         install)
             install_docker
             ;;
