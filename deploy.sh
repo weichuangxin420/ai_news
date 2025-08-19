@@ -63,24 +63,23 @@ test_connection() {
     fi
 }
 
-# 快速检测关键源
-quick_source_check() {
-    print_step "快速检测关键软件源..."
+# 快速网络连通性检测
+quick_network_check() {
+    print_step "快速网络连通性检测..."
     
-    local critical_sources=(
-        "PyPI官方:https://pypi.org"
-        "PyPI清华镜像:https://pypi.tuna.tsinghua.edu.cn"
+    local critical_services=(
         "Docker Hub:https://registry-1.docker.io"
         "GitHub:https://github.com"
+        "互联网连通性:https://www.google.com"
     )
     
     local quick_successful=0
-    for source in "${critical_sources[@]}"; do
-        name="${source%:*}"
-        url="${source#*:}"
+    for service in "${critical_services[@]}"; do
+        name="${service%:*}"
+        url="${service#*:}"
         print_info "测试 $name..."
         
-        if test_connection "$name" "$url" 10; then
+        if test_connection "$name" "$url" 5; then
             print_message "✅ $name: 正常"
             ((quick_successful++))
         else
@@ -89,121 +88,64 @@ quick_source_check() {
     done
     
     echo ""
-    print_info "关键源检测: $quick_successful/${#critical_sources[@]} 可用"
+    print_info "网络检测: $quick_successful/${#critical_services[@]} 可用"
     
-    if [[ $quick_successful -eq ${#critical_sources[@]} ]]; then
-        print_message "🌟 所有关键源都可用，网络环境优秀！"
+    if [[ $quick_successful -eq ${#critical_services[@]} ]]; then
+        print_message "🌟 网络连通性良好！"
         return 0
-    elif [[ $quick_successful -gt $((${#critical_sources[@]} / 2)) ]]; then
-        print_warning "⚠️  部分关键源不可用，但仍可继续部署"
+    elif [[ $quick_successful -gt 0 ]]; then
+        print_warning "⚠️  部分网络服务不可用，但可继续部署"
         return 1
     else
-        print_error "🚨 大部分关键源不可用，建议检查网络连接"
+        print_error "🚨 网络连接异常，请检查网络配置"
         return 2
     fi
 }
 
-# 完整的源检测功能
-full_source_check() {
-    print_step "开始完整的软件源检测..."
+# Docker环境检测
+check_docker_connectivity() {
+    print_step "检测Docker环境连通性..."
     
-    # 定义所有要检测的源
-    declare -A sources=(
-        # Python PyPI源
-        ["PyPI官方"]="https://pypi.org"
-        ["PyPI清华镜像"]="https://pypi.tuna.tsinghua.edu.cn"
-        ["PyPI阿里镜像"]="https://mirrors.aliyun.com/pypi"
-        ["PyPI豆瓣镜像"]="https://pypi.douban.com"
-        ["PyPI中科大镜像"]="https://pypi.mirrors.ustc.edu.cn"
-        
-        # Docker相关源
+    # 检测Docker相关服务
+    declare -A docker_services=(
         ["Docker Hub"]="https://registry-1.docker.io"
-        ["Docker安装脚本"]="https://get.docker.com"
-        ["Docker阿里镜像"]="https://registry.cn-hangzhou.aliyuncs.com"
-        
-        # Linux包管理源
-        ["Ubuntu官方源"]="http://archive.ubuntu.com"
-        ["Ubuntu清华镜像"]="https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
-        ["Ubuntu阿里镜像"]="https://mirrors.aliyun.com/ubuntu"
-        ["Debian官方源"]="http://deb.debian.org"
-        ["Debian清华镜像"]="https://mirrors.tuna.tsinghua.edu.cn/debian"
-        ["CentOS阿里镜像"]="https://mirrors.aliyun.com/centos"
-        ["EPEL源"]="https://dl.fedoraproject.org/pub/epel"
-        
-        # Git相关
-        ["GitHub"]="https://github.com"
-        ["GitLab"]="https://gitlab.com"
-        ["Gitee"]="https://gitee.com"
+        ["Docker官方安装脚本"]="https://get.docker.com"
+        ["GitHub Docker源码"]="https://github.com/docker"
     )
     
-    # 统计变量
-    total_sources=${#sources[@]}
-    successful_sources=0
-    failed_sources=()
-    pypi_available=()
+    local successful=0
+    local total=${#docker_services[@]}
     
     echo ""
-    print_info "=== 开始检测各类软件源 ==="
-    echo ""
+    print_info "=== Docker服务连通性检测 ==="
     
-    # 遍历检测所有源
-    for name in "${!sources[@]}"; do
-        url="${sources[$name]}"
+    for name in "${!docker_services[@]}"; do
+        url="${docker_services[$name]}"
         print_info "正在测试 $name..."
         
-        if test_connection "$name" "$url" 15; then
+        if test_connection "$name" "$url" 10; then
             print_message "✅ $name: 连接正常"
-            ((successful_sources++))
-            
-            # 记录可用的PyPI源
-            if [[ "$name" == *"PyPI"* ]]; then
-                pypi_available+=("$name: $url")
-            fi
+            ((successful++))
         else
             print_warning "❌ $name: 连接失败"
-            failed_sources+=("$name")
         fi
-        
-        # 添加短暂延迟，避免过于频繁的请求
-        sleep 0.1
     done
     
-    # 显示检测总结
     echo ""
-    print_info "=== 源检测总结 ==="
-    print_info "总检测数: $total_sources"
-    print_info "成功连接: $successful_sources"
-    print_info "连接失败: $((total_sources - successful_sources))"
-    print_info "成功率: $(( successful_sources * 100 / total_sources ))%"
+    print_info "=== Docker连通性总结 ==="
+    print_info "Docker服务检测: $successful/$total 可用"
     
-    # 显示可用的PyPI源建议
-    if [[ ${#pypi_available[@]} -gt 0 ]]; then
-        echo ""
-        print_info "=== 可用的PyPI源 ==="
-        for pypi in "${pypi_available[@]}"; do
-            print_message "✅ $pypi"
-        done
-        print_info "Dockerfile将智能选择最优源进行构建"
-    fi
-    
-    # 网络环境评估
-    echo ""
-    print_info "=== 网络环境评估 ==="
-    if [[ $successful_sources -gt $((total_sources * 80 / 100)) ]]; then
-        print_message "🌟 网络环境: 优秀 (>80% 源可用)"
-        print_info "建议: 可以使用官方源，构建速度会很快"
+    if [[ $successful -eq $total ]]; then
+        print_message "🌟 Docker环境连通性优秀"
+        print_info "💡 提示: Docker daemon的镜像源配置将自动处理多源重试"
         return 0
-    elif [[ $successful_sources -gt $((total_sources * 60 / 100)) ]]; then
-        print_message "🟢 网络环境: 良好 (>60% 源可用)"
-        print_info "建议: 优先使用国内镜像源以提高稳定性"
-        return 0
-    elif [[ $successful_sources -gt $((total_sources * 40 / 100)) ]]; then
-        print_warning "🟡 网络环境: 一般 (>40% 源可用)"
-        print_info "建议: 使用多源配置，设置备用源"
+    elif [[ $successful -gt 0 ]]; then
+        print_warning "⚠️  部分Docker服务不可用，但可继续构建"
+        print_info "💡 提示: Docker daemon的镜像源配置将提供备用源"
         return 1
     else
-        print_error "🔴 网络环境: 较差 (<40% 源可用)"
-        print_info "建议: 检查网络连接，考虑使用代理或VPN"
+        print_error "🔴 Docker服务连通性异常"
+        print_info "建议: 检查网络连接或代理配置"
         return 2
     fi
 }
@@ -425,29 +367,30 @@ check_system_compatibility() {
         print_warning "⚠️  Docker Compose: 未安装"
     fi
     
-    # 检测网络连接和软件源
+    # 检测网络连通性
     if [[ "$SKIP_NETWORK_CHECK" == "false" ]]; then
         echo ""
-        print_info "=== 软件源连接检测 ==="
-        print_info "ℹ️  网络检查可能需要1-2分钟，如需跳过请使用: $0 check --skip-network"
+        print_info "=== 网络连通性检测 ==="
+        print_info "ℹ️  网络检查可能需要30秒，如需跳过请使用: $0 check --skip-network"
+        print_info "💡 注意: Docker daemon镜像源配置将自动处理多源重试"
         
-        # 执行快速检测
-        if quick_source_check; then
-            print_info "快速检测通过，是否需要完整检测？[y/N]"
-            read -t 10 -r do_full_check
-            if [[ "$do_full_check" == "y" || "$do_full_check" == "Y" ]]; then
-                full_source_check
+        # 执行快速网络检测
+        if quick_network_check; then
+            print_info "基础网络检测通过，是否检测Docker连通性？[y/N]"
+            read -t 10 -r do_docker_check
+            if [[ "$do_docker_check" == "y" || "$do_docker_check" == "Y" ]]; then
+                check_docker_connectivity
             else
-                print_info "已跳过完整检测，关键源检测通过"
+                print_info "已跳过Docker连通性检测"
             fi
         else
-            print_warning "快速检测发现问题，建议运行完整检测"
-            print_info "是否运行完整检测？[Y/n]"
-            read -t 15 -r do_full_check
-            if [[ "$do_full_check" != "n" && "$do_full_check" != "N" ]]; then
-                full_source_check
+            print_warning "基础网络检测发现问题，建议检测Docker连通性"
+            print_info "是否检测Docker连通性？[Y/n]"
+            read -t 15 -r do_docker_check
+            if [[ "$do_docker_check" != "n" && "$do_docker_check" != "N" ]]; then
+                check_docker_connectivity
             else
-                print_warning "已跳过完整检测，可能影响构建成功率"
+                print_warning "已跳过Docker连通性检测"
             fi
         fi
     else
@@ -594,8 +537,8 @@ build_image() {
         fi
     fi
     
-    # 使用标准构建（Dockerfile已经包含多源优化）
-    print_info "使用多源优化Dockerfile进行构建..."
+    # 使用标准构建（依赖Docker daemon的镜像源配置）
+    print_info "使用优化Dockerfile进行构建（依赖Docker daemon镜像源配置）..."
     docker-compose build --no-cache
     print_message "Docker镜像构建完成"
 }
@@ -709,9 +652,9 @@ show_help() {
     echo "  install   - 自动安装Docker环境 (需要sudo权限)"
     echo "  check     - 检查系统兼容性和环境状态"
     echo "              可选参数: --skip-network (跳过网络检查)"
-    echo "  sources   - 检测软件源连接状态"
-    echo "              --quick: 快速检测关键源"
-    echo "              --full:  完整检测所有源 (默认)"
+    echo "  network   - 检测网络连通性状态"
+    echo "              --quick: 快速网络连通性检测"
+    echo "              --docker: Docker环境连通性检测 (默认)"
     echo ""
     echo "🚀 服务管理:"
     echo "  build     - 构建Docker镜像"
@@ -746,17 +689,17 @@ main() {
         check)
             check_system_compatibility "$@"
             ;;
-        sources)
+        network)
             case "${2:-}" in
                 --quick|-q)
-                    quick_source_check
+                    quick_network_check
                     ;;
-                --full|-f|"")
-                    full_source_check
+                --docker|-d|"")
+                    check_docker_connectivity
                     ;;
                 *)
-                    print_error "未知源检测选项: $2"
-                    echo "用法: $0 sources [--quick|--full]"
+                    print_error "未知网络检测选项: $2"
+                    echo "用法: $0 network [--quick|--docker]"
                     exit 1
                     ;;
             esac
