@@ -8,32 +8,12 @@ news_collection:
   
   # 新闻源配置
   sources:
-    # RSS源
-    rss_feeds:
-      - name: "财联社RSS"
-        url: "https://rsshub.app/cls/telegraph"
-        category: "快讯"
-        enabled: true
-      - name: "格隆汇RSS"
-        url: "https://rsshub.app/gelonghui/live"
-        category: "实时"
-        enabled: true
-      - name: "雪球RSS"
-        url: "https://rsshub.app/xueqiu/hots"
-        category: "热帖"
-        enabled: true
-      - name: "新浪财经RSS"
-        url: "https://finance.sina.com.cn/roll/index.d.html?cid=56588&page=1"
-        category: "财经"
-        enabled: false  # 需要额外解析
-      - name: "测试RSS"
-        url: "https://feeds.bbci.co.uk/news/rss.xml"
-        category: "测试"
-        enabled: false  # 仅用于测试
+    # RSS源 - 暂无可用的RSS源
+    rss_feeds: []
     
-    # API源
+    # API源 - 只保留测试通过的API源
     api_sources:
-      # 东方财富API（免费）
+      # 东方财富API（测试通过 ✅）
       eastmoney:
         base_url: "https://push2.eastmoney.com/api/qt/clist/get"
         enabled: true
@@ -41,46 +21,22 @@ news_collection:
           np: 2
           fltt: 1
           invt: 2
+          fields: "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f22,f28,f30,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40,f41,f42,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65,f66,f67,f68,f69,f70,f71,f72,f73,f74,f75,f76,f77,f78,f79,f80,f81,f82,f83"
+      
+      # 腾讯财经API（测试通过 ✅）
+      tencent_finance:
+        base_url: "https://qt.gtimg.cn/q="
+        enabled: true
+        description: "腾讯股票数据接口"
+      
+      # 新浪财经API（修改为可靠接口 ✅）
+      sina_finance:
+        base_url: "https://hq.sinajs.cn/list="
+        enabled: true
+        description: "新浪股票实时数据接口"
     
-    # 网页爬虫源
-    web_scraping:
-      - name: "新浪财经"
-        base_url: "https://finance.sina.com.cn"
-        selectors:
-          title: "h1"
-          content: ".article-content"
-        enabled: false  # 默认关闭，避免过度爬取
-        delay: 2  # 请求间隔秒数
-  
-  # 内容过滤
-  filters:
-    # A股相关关键词
-    keywords:
-      - "A股"
-      - "上证"
-      - "深证"
-      - "创业板"
-      - "科创板"
-      - "沪深"
-      - "股市"
-      - "券商"
-      - "基金"
-      - "IPO"
-      - "重组"
-      - "并购"
-      - "涨停"
-      - "跌停"
-      - "ST"
-      - "退市"
-      - "监管"
-      - "证监会"
-      - "央行"
-      - "银保监会"
-    
-    # 排除关键词
-    exclude_keywords:
-      - "测试"
-      - "demo"
+    # 网页爬虫源 - 暂时禁用避免被封
+    web_scraping: []
 
 # AI分析配置
 ai_analysis:

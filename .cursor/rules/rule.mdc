@@ -3,5 +3,6 @@ description:
 globs:
 alwaysApply: false
 ---
-项目有对应的虚拟环境，进行操作前，请激活虚拟环境，使用的是windows+powershell，请注意语法
+项目有对应的虚拟环境，进行操作前，请激活虚拟环境，使用的是windows+powershell,并不是服务器，请注意语法，如： &&不被powershell支持
 你可以用ssh访问服务器，公网ip为115.190.23.27，端口22，用户名root，密码Tx20021104@wcx
+不要单独创建readme文件，所有readme集成到已有的readme中

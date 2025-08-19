@@ -102,14 +102,14 @@ class NewsCollector:
             web_news = self._collect_web_news(web_scraping)
             all_news.extend(web_news)
 
-        # 过滤和去重
-        filtered_news = self._filter_and_deduplicate(all_news)
+        # 过滤和去重（移除关键字筛选）
+        filtered_news = self._deduplicate_news(all_news)
 
         # 保存到数据库
         if filtered_news:
             saved_count = db_manager.save_news_items_batch(filtered_news)
             logger.info(
-                f"新闻收集完成: 收集 {len(all_news)} 条，过滤后 {len(filtered_news)} 条，保存 {saved_count} 条"
+                f"新闻收集完成: 收集 {len(all_news)} 条，去重后 {len(filtered_news)} 条，保存 {saved_count} 条"
             )
         else:
             logger.info("未收集到新的新闻")
@@ -195,8 +195,8 @@ class NewsCollector:
                     else:
                         news_item.publish_time = datetime.now()
 
-                    # 提取关键词
-                    news_item.keywords = self._extract_keywords(
+                    # 生成简单标签（不进行关键字筛选）
+                    news_item.keywords = self._generate_simple_tags(
                         news_item.title, news_item.content
                     )
 
@@ -230,6 +230,16 @@ class NewsCollector:
         if "eastmoney" in api_sources and api_sources["eastmoney"].get("enabled"):
             eastmoney_news = self._fetch_eastmoney_news(api_sources["eastmoney"])
             news_list.extend(eastmoney_news)
+
+        # 腾讯财经API  
+        if "tencent_finance" in api_sources and api_sources["tencent_finance"].get("enabled"):
+            tencent_news = self._fetch_tencent_news(api_sources["tencent_finance"])
+            news_list.extend(tencent_news)
+
+        # 新浪财经API
+        if "sina_finance" in api_sources and api_sources["sina_finance"].get("enabled"):
+            sina_news = self._fetch_sina_news(api_sources["sina_finance"])
+            news_list.extend(sina_news)
 
         return news_list
 
@@ -268,7 +278,7 @@ class NewsCollector:
 
                 # 解析股票数据为新闻格式
                 if "data" in data and "diff" in data["data"]:
-                    for item in data["data"]["diff"]:
+                    for item in data["data"]["diff"][:20]:  # 限制数量
                         try:
                             news_item = NewsItem()
                             news_item.title = f"股票动态: {item.get('f14', '未知')} ({item.get('f12', '')})"
@@ -292,6 +302,110 @@ class NewsCollector:
         except Exception as e:
             logger.error(f"获取东方财富数据失败: {e}")
 
+        return news_list
+
+    def _fetch_tencent_news(self, config: Dict) -> List[NewsItem]:
+        """
+        获取腾讯财经数据（示例实现）
+
+        Args:
+            config: 腾讯API配置
+
+        Returns:
+            List[NewsItem]: 新闻列表
+        """
+        news_list = []
+        
+        try:
+            # 腾讯股票接口示例：获取主要指数
+            symbols = ["s_sh000001", "s_sz399001", "s_sz399006"]  # 上证指数、深证成指、创业板指
+            url = config["base_url"] + ",".join(symbols)
+            
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            lines = response.text.strip().split('\n')
+            for line in lines:
+                if line.startswith('v_'):
+                    try:
+                        # 解析腾讯数据格式
+                        parts = line.split('=')
+                        if len(parts) >= 2:
+                            symbol = parts[0].replace('v_', '')
+                            data = parts[1].strip('"').split('~')
+                            
+                            if len(data) > 3:
+                                news_item = NewsItem()
+                                news_item.title = f"指数动态: {data[1]} 最新价格 {data[3]}"
+                                news_item.content = f"当前价格: {data[3]}, 涨跌: {data[31] if len(data) > 31 else 'N/A'}"
+                                news_item.source = "腾讯财经API"
+                                news_item.category = "指数行情"
+                                news_item.publish_time = datetime.now()
+                                news_item.url = f"https://gu.qq.com/{symbol}"
+                                news_item.keywords = ["指数", "行情"]
+                                
+                                news_list.append(news_item)
+                    except Exception as e:
+                        logger.error(f"处理腾讯数据行失败: {e}")
+                        continue
+                        
+            logger.info(f"腾讯财经API获取到 {len(news_list)} 条数据")
+            
+        except Exception as e:
+            logger.error(f"获取腾讯财经数据失败: {e}")
+            
+        return news_list
+
+    def _fetch_sina_news(self, config: Dict) -> List[NewsItem]:
+        """
+        获取新浪财经数据（示例实现）
+
+        Args:
+            config: 新浪API配置
+
+        Returns:
+            List[NewsItem]: 新闻列表
+        """
+        news_list = []
+        
+        try:
+            # 新浪股票接口示例
+            symbols = ["sh000001", "sz399001", "sz399006"]  # 主要指数
+            url = config["base_url"] + ",".join(symbols)
+            
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            lines = response.text.strip().split('\n')
+            for line in lines:
+                if 'hq_str_' in line:
+                    try:
+                        # 解析新浪数据格式
+                        parts = line.split('=')
+                        if len(parts) >= 2:
+                            symbol = parts[0].split('_')[-1].replace('"', '')
+                            data = parts[1].strip('"').split(',')
+                            
+                            if len(data) > 3:
+                                news_item = NewsItem()
+                                news_item.title = f"股市快讯: {data[0]} 当前 {data[3]}"
+                                news_item.content = f"开盘: {data[1]}, 最高: {data[4]}, 最低: {data[5]}, 当前: {data[3]}"
+                                news_item.source = "新浪财经API"
+                                news_item.category = "股市行情"
+                                news_item.publish_time = datetime.now()
+                                news_item.url = f"https://finance.sina.com.cn/realstock/company/{symbol}/nc.shtml"
+                                news_item.keywords = ["股市", "行情"]
+                                
+                                news_list.append(news_item)
+                    except Exception as e:
+                        logger.error(f"处理新浪数据行失败: {e}")
+                        continue
+                        
+            logger.info(f"新浪财经API获取到 {len(news_list)} 条数据")
+            
+        except Exception as e:
+            logger.error(f"获取新浪财经数据失败: {e}")
+            
         return news_list
 
     def _format_stock_data(self, item: Dict) -> str:
@@ -406,8 +520,8 @@ class NewsCollector:
                                 :500
                             ]  # 限制长度
 
-                    # 提取关键词
-                    news_item.keywords = self._extract_keywords(
+                    # 生成简单标签
+                    news_item.keywords = self._generate_simple_tags(
                         news_item.title, news_item.content
                     )
 
@@ -471,49 +585,52 @@ class NewsCollector:
         except:
             return datetime.now()
 
-    def _extract_keywords(self, title: str, content: str) -> List[str]:
+    def _generate_simple_tags(self, title: str, content: str) -> List[str]:
         """
-        提取关键词
+        生成简单标签（不使用关键字筛选）
 
         Args:
             title: 标题
             content: 内容
 
         Returns:
-            List[str]: 关键词列表
+            List[str]: 标签列表
         """
-        keywords = []
+        tags = []
         text = f"{title} {content}".lower()
 
-        # 从配置中获取关键词
-        include_keywords = (
-            self.config.get("news_collection", {})
-            .get("keywords", {})
-            .get("include", [])
-        )
+        # 基于常见财经术语生成标签
+        common_terms = {
+            "股票": ["股票", "股价", "上市", "涨停", "跌停"],
+            "指数": ["上证", "深证", "创业板", "科创板", "指数"],
+            "基金": ["基金", "ETF", "私募", "公募"],
+            "债券": ["债券", "国债", "企业债"],
+            "外汇": ["汇率", "美元", "人民币", "外汇"],
+            "期货": ["期货", "大宗商品", "原油", "黄金"],
+            "银行": ["银行", "存款", "贷款", "利率"],
+            "保险": ["保险", "寿险", "财险"],
+            "房地产": ["房价", "楼市", "地产", "房产"],
+            "科技": ["科技", "互联网", "AI", "芯片"]
+        }
 
-        for keyword in include_keywords:
-            if keyword.lower() in text:
-                keywords.append(keyword)
+        for category, keywords in common_terms.items():
+            if any(keyword in text for keyword in keywords):
+                tags.append(category)
 
-        return list(set(keywords))  # 去重
+        return tags[:5]  # 限制标签数量
 
-    def _filter_and_deduplicate(self, news_list: List[NewsItem]) -> List[NewsItem]:
+    def _deduplicate_news(self, news_list: List[NewsItem]) -> List[NewsItem]:
         """
-        过滤和去重新闻
+        新闻去重（移除关键字筛选功能）
 
         Args:
             news_list: 原始新闻列表
 
         Returns:
-            List[NewsItem]: 过滤后的新闻列表
+            List[NewsItem]: 去重后的新闻列表
         """
         filtered_news = []
         seen_titles = set()
-
-        keywords_config = self.config.get("news_collection", {}).get("keywords", {})
-        include_keywords = keywords_config.get("include", [])
-        exclude_keywords = keywords_config.get("exclude", [])
 
         for news in news_list:
             # 跳过空标题
@@ -529,21 +646,6 @@ class NewsCollector:
             # 数据库去重检查
             if db_manager.check_news_exists(news.title, news.url):
                 self.stats["duplicates"] += 1
-                continue
-
-            # 关键词过滤
-            text = f"{news.title} {news.content}".lower()
-
-            # 检查排除关键词
-            if exclude_keywords and any(
-                keyword.lower() in text for keyword in exclude_keywords
-            ):
-                continue
-
-            # 检查包含关键词（如果配置了的话）
-            if include_keywords and not any(
-                keyword.lower() in text for keyword in include_keywords
-            ):
                 continue
 
             seen_titles.add(title_hash)
