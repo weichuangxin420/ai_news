@@ -21,6 +21,18 @@ PROJECT_NAME="ai_news"
 CONTAINER_NAME="ai_news_app"
 IMAGE_NAME="ai_news"
 
+# Docker Compose命令选择函数
+get_compose_command() {
+    if docker compose version &> /dev/null; then
+        echo "docker compose"
+    elif command -v docker-compose &> /dev/null; then
+        echo "docker-compose"
+    else
+        print_error "Docker Compose未安装"
+        exit 1
+    fi
+}
+
 # 打印带颜色的消息
 print_message() {
     echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] ✅ $1${NC}"
@@ -182,10 +194,26 @@ install_docker() {
     print_step "检查并安装Docker环境..."
     
     # 检查是否已安装
-    if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; then
-        print_message "Docker环境已就绪"
+    local docker_installed=false
+    local compose_installed=false
+    
+    if command -v docker &> /dev/null; then
+        docker_installed=true
         print_info "Docker版本: $(docker --version)"
-        print_info "Docker Compose版本: $(docker-compose --version)"
+    fi
+    
+    # 检查Docker Compose v2 (新版本) 或 v1 (旧版本)
+    if docker compose version &> /dev/null; then
+        compose_installed=true
+        print_info "Docker Compose版本 (v2): $(docker compose version)"
+    elif command -v docker-compose &> /dev/null; then
+        compose_installed=true
+        print_info "Docker Compose版本 (v1): $(docker-compose --version)"
+        print_warning "建议升级到Docker Compose v2，使用 'docker compose' 命令"
+    fi
+    
+    if [[ "$docker_installed" == true && "$compose_installed" == true ]]; then
+        print_message "Docker环境已就绪"
         return 0
     fi
     
@@ -254,14 +282,41 @@ install_docker() {
         print_message "Docker安装完成"
     fi
     
-    # 安装Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
-        print_step "安装Docker Compose..."
-        COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d\" -f4)
-        curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        chmod +x /usr/local/bin/docker-compose
-        ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-        print_message "Docker Compose安装完成"
+    # 安装Docker Compose v2 (优先) 或 v1 (兼容)
+    if ! docker compose version &> /dev/null && ! command -v docker-compose &> /dev/null; then
+        print_step "安装Docker Compose v2..."
+        
+        # Docker Compose v2 通常随新版Docker一起安装
+        # 如果Docker版本足够新，Compose v2可能已经可用
+        if docker compose version &> /dev/null 2>&1; then
+            print_message "Docker Compose v2 已可用"
+        else
+            print_info "尝试安装Docker Compose v2插件..."
+            
+            # 创建插件目录
+            mkdir -p /usr/local/lib/docker/cli-plugins
+            
+            # 下载最新版本的Docker Compose v2
+            COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d\" -f4)
+            print_info "下载Docker Compose v2版本: $COMPOSE_VERSION"
+            
+            curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" \
+                -o /usr/local/lib/docker/cli-plugins/docker-compose
+            chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+            
+            # 验证安装
+            if docker compose version &> /dev/null; then
+                print_message "Docker Compose v2 安装成功"
+            else
+                print_warning "Docker Compose v2 安装可能失败，回退到v1..."
+                # 回退到传统安装方法
+                curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" \
+                    -o /usr/local/bin/docker-compose
+                chmod +x /usr/local/bin/docker-compose
+                ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+                print_message "Docker Compose v1 安装完成"
+            fi
+        fi
     fi
     
     print_message "Docker环境安装成功！"
@@ -361,8 +416,12 @@ check_system_compatibility() {
         print_warning "⚠️  Docker: 未安装"
     fi
     
-    if command -v docker-compose &> /dev/null; then
-        print_message "✅ Docker Compose: $(docker-compose --version)"
+    # 检查Docker Compose v2和v1
+    if docker compose version &> /dev/null; then
+        print_message "✅ Docker Compose v2: $(docker compose version --short)"
+    elif command -v docker-compose &> /dev/null; then
+        print_message "✅ Docker Compose v1: $(docker-compose --version)"
+        print_warning "⚠️  建议升级到Docker Compose v2"
     else
         print_warning "⚠️  Docker Compose: 未安装"
     fi
@@ -479,7 +538,8 @@ check_docker() {
         exit 1
     fi
     
-    if ! command -v docker-compose &> /dev/null; then
+    # 检查Docker Compose v2或v1
+    if ! docker compose version &> /dev/null && ! command -v docker-compose &> /dev/null; then
         print_error "Docker Compose未安装"
         print_info "运行以下命令自动安装: sudo $0 install"
         exit 1
@@ -539,26 +599,28 @@ build_image() {
     
     # 使用标准构建（依赖Docker daemon的镜像源配置）
     print_info "使用优化Dockerfile进行构建（依赖Docker daemon镜像源配置）..."
-    docker-compose build --no-cache
+    local compose_cmd=$(get_compose_command)
+    $compose_cmd build --no-cache
     print_message "Docker镜像构建完成"
 }
 
 # 启动服务
 start_service() {
     print_message "启动AI新闻收集服务..."
-    docker-compose up -d
+    local compose_cmd=$(get_compose_command)
+    $compose_cmd up -d
     
     # 等待服务启动
     print_info "等待服务启动..."
     sleep 10
     
     # 检查服务状态
-    if docker-compose ps | grep -q "Up"; then
+    if $compose_cmd ps | grep -q "Up"; then
         print_message "服务启动成功！"
         show_status
     else
         print_error "服务启动失败，请检查日志"
-        docker-compose logs --tail=50
+        $compose_cmd logs --tail=50
         exit 1
     fi
 }
@@ -566,21 +628,24 @@ start_service() {
 # 停止服务
 stop_service() {
     print_message "停止AI新闻收集服务..."
-    docker-compose down
+    local compose_cmd=$(get_compose_command)
+    $compose_cmd down
     print_message "服务已停止"
 }
 
 # 重启服务
 restart_service() {
     print_message "重启AI新闻收集服务..."
-    docker-compose restart
+    local compose_cmd=$(get_compose_command)
+    $compose_cmd restart
     print_message "服务重启完成"
 }
 
 # 显示服务状态
 show_status() {
     print_info "=== 服务状态 ==="
-    docker-compose ps
+    local compose_cmd=$(get_compose_command)
+    $compose_cmd ps
     
     print_info "=== 容器健康状态 ==="
     docker inspect --format='{{.State.Health.Status}}' $CONTAINER_NAME 2>/dev/null || echo "健康检查未配置"
@@ -592,7 +657,8 @@ show_status() {
 # 显示日志
 show_logs() {
     print_info "显示服务日志 (Ctrl+C 退出)..."
-    docker-compose logs -f --tail=100
+    local compose_cmd=$(get_compose_command)
+    $compose_cmd logs -f --tail=100
 }
 
 # 清理资源
@@ -602,7 +668,8 @@ clean_resources() {
     case "$response" in
         [yY][eE][sS]|[yY]) 
             print_message "清理Docker资源..."
-            docker-compose down -v --rmi all
+            local compose_cmd=$(get_compose_command)
+            $compose_cmd down -v --rmi all
             docker system prune -f
             print_message "清理完成"
             ;;
@@ -623,9 +690,10 @@ update_service() {
     fi
     
     # 重新构建并启动
-    docker-compose down
-    docker-compose build --no-cache
-    docker-compose up -d
+    local compose_cmd=$(get_compose_command)
+    $compose_cmd down
+    $compose_cmd build --no-cache
+    $compose_cmd up -d
     
     print_message "服务更新完成"
 }
