@@ -54,113 +54,7 @@ print_step() {
     echo -e "${PURPLE}[STEP] 🚀 $1${NC}"
 }
 
-# 测试网络连接
-test_connection() {
-    local name="$1"
-    local url="$2"
-    local timeout="${3:-15}"
-    
-    if command -v timeout &> /dev/null; then
-        if timeout "$timeout" curl -s --connect-timeout 10 --max-time "$timeout" "$url" &> /dev/null; then
-            return 0
-        else
-            return 1
-        fi
-    else
-        if curl -s --connect-timeout 10 --max-time "$timeout" "$url" &> /dev/null; then
-            return 0
-        else
-            return 1
-        fi
-    fi
-}
 
-# 快速网络连通性检测
-quick_network_check() {
-    print_step "快速网络连通性检测..."
-    
-    local critical_services=(
-        "Docker Hub:https://registry-1.docker.io"
-        "GitHub:https://github.com"
-        "互联网连通性:https://www.google.com"
-    )
-    
-    local quick_successful=0
-    for service in "${critical_services[@]}"; do
-        name="${service%:*}"
-        url="${service#*:}"
-        print_info "测试 $name..."
-        
-        if test_connection "$name" "$url" 5; then
-            print_message "✅ $name: 正常"
-            ((quick_successful++))
-        else
-            print_warning "❌ $name: 失败"
-        fi
-    done
-    
-    echo ""
-    print_info "网络检测: $quick_successful/${#critical_services[@]} 可用"
-    
-    if [[ $quick_successful -eq ${#critical_services[@]} ]]; then
-        print_message "🌟 网络连通性良好！"
-        return 0
-    elif [[ $quick_successful -gt 0 ]]; then
-        print_warning "⚠️  部分网络服务不可用，但可继续部署"
-        return 1
-    else
-        print_error "🚨 网络连接异常，请检查网络配置"
-        return 2
-    fi
-}
-
-# Docker环境检测
-check_docker_connectivity() {
-    print_step "检测Docker环境连通性..."
-    
-    # 检测Docker相关服务
-    declare -A docker_services=(
-        ["Docker Hub"]="https://registry-1.docker.io"
-        ["Docker官方安装脚本"]="https://get.docker.com"
-        ["GitHub Docker源码"]="https://github.com/docker"
-    )
-    
-    local successful=0
-    local total=${#docker_services[@]}
-    
-    echo ""
-    print_info "=== Docker服务连通性检测 ==="
-    
-    for name in "${!docker_services[@]}"; do
-        url="${docker_services[$name]}"
-        print_info "正在测试 $name..."
-        
-        if test_connection "$name" "$url" 10; then
-            print_message "✅ $name: 连接正常"
-            ((successful++))
-        else
-            print_warning "❌ $name: 连接失败"
-        fi
-    done
-    
-    echo ""
-    print_info "=== Docker连通性总结 ==="
-    print_info "Docker服务检测: $successful/$total 可用"
-    
-    if [[ $successful -eq $total ]]; then
-        print_message "🌟 Docker环境连通性优秀"
-        print_info "💡 提示: Docker daemon的镜像源配置将自动处理多源重试"
-        return 0
-    elif [[ $successful -gt 0 ]]; then
-        print_warning "⚠️  部分Docker服务不可用，但可继续构建"
-        print_info "💡 提示: Docker daemon的镜像源配置将提供备用源"
-        return 1
-    else
-        print_error "🔴 Docker服务连通性异常"
-        print_info "建议: 检查网络连接或代理配置"
-        return 2
-    fi
-}
 
 # 检测操作系统
 detect_os() {
@@ -325,16 +219,6 @@ install_docker() {
 # 系统兼容性检查
 check_system_compatibility() {
     print_step "🔍 系统兼容性检查..."
-    
-    # 检查是否跳过网络测试
-    SKIP_NETWORK_CHECK="${2:-false}"
-    if [[ "$SKIP_NETWORK_CHECK" == "--skip-network" ]]; then
-        print_warning "⚠️  跳过网络连接检查"
-        SKIP_NETWORK_CHECK=true
-    else
-        SKIP_NETWORK_CHECK=false
-    fi
-    
     echo ""
     
     # 检测操作系统信息
@@ -424,37 +308,6 @@ check_system_compatibility() {
         print_warning "⚠️  建议升级到Docker Compose v2"
     else
         print_warning "⚠️  Docker Compose: 未安装"
-    fi
-    
-    # 检测网络连通性
-    if [[ "$SKIP_NETWORK_CHECK" == "false" ]]; then
-        echo ""
-        print_info "=== 网络连通性检测 ==="
-        print_info "ℹ️  网络检查可能需要30秒，如需跳过请使用: $0 check --skip-network"
-        print_info "💡 注意: Docker daemon镜像源配置将自动处理多源重试"
-        
-        # 执行快速网络检测
-        if quick_network_check; then
-            print_info "基础网络检测通过，是否检测Docker连通性？[y/N]"
-            read -t 10 -r do_docker_check
-            if [[ "$do_docker_check" == "y" || "$do_docker_check" == "Y" ]]; then
-                check_docker_connectivity
-            else
-                print_info "已跳过Docker连通性检测"
-            fi
-        else
-            print_warning "基础网络检测发现问题，建议检测Docker连通性"
-            print_info "是否检测Docker连通性？[Y/n]"
-            read -t 15 -r do_docker_check
-            if [[ "$do_docker_check" != "n" && "$do_docker_check" != "N" ]]; then
-                check_docker_connectivity
-            else
-                print_warning "已跳过Docker连通性检测"
-            fi
-        fi
-    else
-        echo ""
-        print_warning "⚠️  已跳过网络连接检测"
     fi
     
     # 模拟操作系统检测
@@ -705,7 +558,7 @@ one_click_deploy() {
     
     # 步骤1: 系统兼容性检查
     print_step "1️⃣ 系统兼容性检查"
-    check_system_compatibility --skip-network
+    check_system_compatibility
     echo ""
     
     # 步骤2: 检查Docker环境
@@ -818,10 +671,6 @@ show_help() {
     echo "🔧 环境管理:"
     echo "  install   - 自动安装Docker环境 (需要sudo权限)"
     echo "  check     - 检查系统兼容性和环境状态"
-    echo "              可选参数: --skip-network (跳过网络检查)"
-    echo "  network   - 检测网络连通性状态"
-    echo "              --quick: 快速网络连通性检测"
-    echo "              --docker: Docker环境连通性检测 (默认)"
     echo ""
     echo "🚀 服务管理:"
     echo "  build     - 构建Docker镜像"
@@ -856,22 +705,7 @@ main() {
             one_click_deploy
             ;;
         check)
-            check_system_compatibility "$@"
-            ;;
-        network)
-            case "${2:-}" in
-                --quick|-q)
-                    quick_network_check
-                    ;;
-                --docker|-d|"")
-                    check_docker_connectivity
-                    ;;
-                *)
-                    print_error "未知网络检测选项: $2"
-                    echo "用法: $0 network [--quick|--docker]"
-                    exit 1
-                    ;;
-            esac
+            check_system_compatibility
             ;;
         install)
             install_docker
