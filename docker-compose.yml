@@ -6,6 +6,9 @@ services:
     container_name: ai_news_app
     restart: unless-stopped
     
+    # 启动命令 - 启动调度器守护进程
+    command: ["python", "main.py", "daemon"]
+    
     # 数据卷映射 - 持久化数据
     volumes:
       - ./data:/app/data
@@ -21,13 +24,13 @@ services:
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
     
-    # 健康检查
+    # 健康检查 - 检查调度器状态
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "python", "main.py", "status"]
+      interval: 60s
+      timeout: 30s
       retries: 3
-      start_period: 40s
+      start_period: 120s
     
     # 依赖服务（如果将来需要数据库）
     # depends_on:

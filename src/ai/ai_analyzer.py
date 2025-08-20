@@ -224,7 +224,7 @@ class AIAnalyzer:
 
             # 首先尝试使用主模型（思考模型）
             try:
-                response = self._call_deepseek_api(prompt)
+            response = self._call_deepseek_api(prompt)
                 result = self._parse_analysis_response(news_item.id, response)
                 self.stats["analyzed"] += 1
                 logger.debug(f"新闻分析完成（主模型）: {news_item.title[:50]}...")
@@ -235,10 +235,10 @@ class AIAnalyzer:
                 
                 # 使用备用模型重试
                 response = self._call_deepseek_api_fallback(prompt)
-                result = self._parse_analysis_response(news_item.id, response)
-                self.stats["analyzed"] += 1
+            result = self._parse_analysis_response(news_item.id, response)
+            self.stats["analyzed"] += 1
                 logger.debug(f"新闻分析完成（备用模型）: {news_item.title[:50]}...")
-                return result
+            return result
 
         except Exception as e:
             logger.error(f"新闻分析失败: {e}")
