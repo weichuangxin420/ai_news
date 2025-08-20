@@ -698,6 +698,101 @@ update_service() {
     print_message "服务更新完成"
 }
 
+# 一键部署
+one_click_deploy() {
+    print_message "🚀 开始一键部署AI新闻收集系统..."
+    echo ""
+    
+    # 步骤1: 系统兼容性检查
+    print_step "1️⃣ 系统兼容性检查"
+    check_system_compatibility --skip-network
+    echo ""
+    
+    # 步骤2: 检查Docker环境
+    print_step "2️⃣ 检查Docker环境"
+    if ! command -v docker &> /dev/null; then
+        print_warning "Docker未安装，开始自动安装..."
+        if [ "$EUID" -ne 0 ]; then
+            print_error "安装Docker需要sudo权限"
+            print_info "请使用: sudo $0 deploy 或 sudo $0"
+            exit 1
+        fi
+        install_docker
+    else
+        print_message "✅ Docker已安装"
+    fi
+    
+    # 检查Docker Compose
+    if ! docker compose version &> /dev/null && ! command -v docker-compose &> /dev/null; then
+        print_warning "Docker Compose未安装，开始自动安装..."
+        if [ "$EUID" -ne 0 ]; then
+            print_error "安装Docker Compose需要sudo权限"
+            print_info "请使用: sudo $0 deploy 或 sudo $0"
+            exit 1
+        fi
+        # 调用安装函数中的Compose安装部分
+        install_docker
+    else
+        print_message "✅ Docker Compose已安装"
+    fi
+    echo ""
+    
+    # 步骤3: 配置文件检查
+    print_step "3️⃣ 配置文件检查"
+    if [ ! -f "config/config.yaml" ]; then
+        if [ -f "config/config.yaml.template" ]; then
+            print_warning "配置文件不存在，从模板创建..."
+            cp config/config.yaml.template config/config.yaml
+            print_message "✅ 配置文件已创建: config/config.yaml"
+            print_warning "⚠️  请编辑配置文件设置以下必要信息:"
+            print_info "   - email.smtp.username: 你的163邮箱"
+            print_info "   - email.smtp.password: 邮箱授权密码"  
+            print_info "   - email.recipients: 收件人列表"
+            print_info "   - ai_analysis.deepseek.api_key: DeepSeek API密钥"
+            print_warning "配置完成后请重新运行: $0 deploy"
+            exit 0
+        else
+            print_error "配置文件模板不存在"
+            exit 1
+        fi
+    else
+        print_message "✅ 配置文件存在"
+    fi
+    echo ""
+    
+    # 步骤4: 创建目录
+    print_step "4️⃣ 创建必要目录"
+    create_directories
+    echo ""
+    
+    # 步骤5: 构建镜像
+    print_step "5️⃣ 构建Docker镜像"
+    build_image
+    echo ""
+    
+    # 步骤6: 启动服务
+    print_step "6️⃣ 启动服务"
+    start_service
+    echo ""
+    
+    # 步骤7: 验证部署
+    print_step "7️⃣ 部署验证"
+    sleep 5
+    show_status
+    echo ""
+    
+    # 部署完成
+    print_message "🎉 一键部署完成！"
+    echo ""
+    print_info "=== 后续操作建议 ==="
+    print_info "📊 查看服务状态: $0 status"
+    print_info "📋 查看实时日志: $0 logs"
+    print_info "🧪 测试新闻收集: docker exec ai_news_app python main.py run-once"
+    print_info "📧 测试邮件功能: docker exec ai_news_app python main.py email-test"
+    print_info "⏹️  停止服务: $0 stop"
+    print_info "🔄 重启服务: $0 restart"
+}
+
 # 备份数据
 backup_data() {
     BACKUP_DIR="backup/$(date +%Y%m%d_%H%M%S)"
@@ -715,6 +810,10 @@ show_help() {
     echo "AI新闻收集系统 - Docker部署脚本"
     echo ""
     echo "使用方法: $0 [命令]"
+    echo ""
+    echo "🎯 一键部署:"
+    echo "  (无参数)  - 🚀 一键部署: 检测+安装+构建+启动 (推荐)"
+    echo "  deploy    - 🚀 一键部署: 检测+安装+构建+启动 (同上)"
     echo ""
     echo "🔧 环境管理:"
     echo "  install   - 自动安装Docker环境 (需要sudo权限)"
@@ -739,21 +838,23 @@ show_help() {
     echo "  help      - 显示此帮助信息"
     echo ""
     echo "📝 使用示例:"
-    echo "  sudo $0 install    # 首次安装Docker环境"
-    echo "  $0 build          # 构建镜像"
-    echo "  $0 start          # 启动服务"
-    echo "  $0 logs           # 查看日志"
+    echo "  ./deploy.sh           # 🚀 一键部署 (推荐)"
+    echo "  sudo ./deploy.sh      # 🚀 一键部署 (包含自动安装)"
+    echo "  $0 status            # 查看服务状态"
+    echo "  $0 logs              # 查看日志"
     echo ""
     echo "💡 快速开始:"
-    echo "  1. $0 check               # 检查系统兼容性"
-    echo "  2. sudo $0 install        # 安装Docker环境"
-    echo "  3. 编辑 config/config.yaml 配置文件"
-    echo "  4. $0 build && $0 start    # 构建并启动服务"
+    echo "  1. sudo ./deploy.sh           # 🚀 一键完成所有操作"
+    echo "  2. 编辑 config/config.yaml 配置文件 (如果需要)"
+    echo "  3. ./deploy.sh deploy         # 重新部署 (如果修改了配置)"
 }
 
 # 主函数
 main() {
-    case "${1:-help}" in
+    case "${1:-deploy}" in
+        ""|deploy)
+            one_click_deploy
+            ;;
         check)
             check_system_compatibility "$@"
             ;;
