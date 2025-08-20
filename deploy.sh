@@ -359,8 +359,8 @@ check_system_compatibility() {
             echo "1. Docker已安装，跳过安装步骤"
         fi
         
-        echo "2. cp config/config.yaml.template config/config.yaml"
-        echo "3. 编辑config/config.yaml配置文件"
+        echo "2. cp config/config.yaml.template config.yaml"
+        echo "3. 编辑config.yaml配置文件"
         echo "4. $0 build                   # 构建镜像"
         echo "5. $0 start                   # 启动服务"
         
@@ -401,19 +401,19 @@ check_docker() {
 
 # 检查配置文件
 check_config() {
-    if [ ! -f "config/config.yaml" ]; then
+    if [ ! -f "config.yaml" ]; then
         if [ -f "config/config.yaml.template" ]; then
             print_warning "配置文件不存在，是否从模板创建? (y/N)"
             read -r response
             case "$response" in
                 [yY][eE][sS]|[yY]) 
-                    cp config/config.yaml.template config/config.yaml
-                    print_message "配置文件已创建: config/config.yaml"
+                    cp config/config.yaml.template config.yaml
+                    print_message "配置文件已创建: config.yaml"
                     print_warning "请编辑配置文件填入必要信息后重新运行"
                     exit 0
                     ;;
                 *)
-                    print_error "配置文件不存在: config/config.yaml"
+                    print_error "配置文件不存在: config.yaml"
                     print_info "请复制 config/config.yaml.template 并填写正确的配置"
                     exit 1
                     ;;
@@ -592,11 +592,11 @@ one_click_deploy() {
     
     # 步骤3: 配置文件检查
     print_step "3️⃣ 配置文件检查"
-    if [ ! -f "config/config.yaml" ]; then
+    if [ ! -f "config.yaml" ]; then
         if [ -f "config/config.yaml.template" ]; then
             print_warning "配置文件不存在，从模板创建..."
-            cp config/config.yaml.template config/config.yaml
-            print_message "✅ 配置文件已创建: config/config.yaml"
+            cp config/config.yaml.template config.yaml
+            print_message "✅ 配置文件已创建: config.yaml"
             print_warning "⚠️  请编辑配置文件设置以下必要信息:"
             print_info "   - email.smtp.username: 你的163邮箱"
             print_info "   - email.smtp.password: 邮箱授权密码"  
@@ -653,7 +653,7 @@ backup_data() {
     
     mkdir -p $BACKUP_DIR
     cp -r data/ $BACKUP_DIR/ 2>/dev/null || print_warning "data目录不存在，跳过"
-    cp config/config.yaml $BACKUP_DIR/ 2>/dev/null || print_warning "配置文件不存在，跳过"
+    cp config.yaml $BACKUP_DIR/ 2>/dev/null || print_warning "配置文件不存在，跳过"
     
     print_message "数据备份完成: $BACKUP_DIR"
 }
@@ -694,7 +694,7 @@ show_help() {
     echo ""
     echo "💡 快速开始:"
     echo "  1. sudo ./deploy.sh           # 🚀 一键完成所有操作"
-    echo "  2. 编辑 config/config.yaml 配置文件 (如果需要)"
+    echo "  2. 编辑 config.yaml 配置文件 (如果需要)"
     echo "  3. ./deploy.sh deploy         # 重新部署 (如果修改了配置)"
 }
 

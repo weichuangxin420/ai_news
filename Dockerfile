@@ -61,4 +61,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=5 \
             sys.exit(1)"
 
 # 设置启动命令
-CMD ["python", "main.py", "scheduler-run"] 
+CMD ["python", "main.py", "daemon"] 
