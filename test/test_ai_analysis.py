@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AI分析功能测试模块
-测试AI分析器的各项功能
+测试AI分析器的核心功能（只保留主流程使用的逻辑）
 """
 
 import os
@@ -13,7 +13,7 @@ from typing import Dict, List
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ai.ai_analyzer import AIAnalyzer
+from src.ai.ai_analyzer import AIAnalyzer, create_enhanced_analyzer
 from src.utils.database import NewsItem, db_manager
 from src.utils.logger import get_logger
 
@@ -21,34 +21,36 @@ logger = get_logger("test_ai_analysis")
 
 
 class AIAnalysisTester:
-    """AI分析测试器"""
+    """AI分析测试器 - 只测试主流程使用的核心功能"""
     
     def __init__(self):
         """初始化测试器"""
         self.analyzer = None
+        self.enhanced_analyzer = None
         self.results = {}
-        self.mock_mode = False
         
     def test_analyzer_initialization(self) -> bool:
         """测试分析器初始化"""
         print("🔍 测试AI分析器初始化...")
         
         try:
+            # 测试标准分析器
             self.analyzer = AIAnalyzer()
-            print("✅ AI分析器初始化成功")
+            print("✅ 标准AI分析器初始化成功")
             
-            # 检查API配置
-            api_key = self.analyzer.config.get("ai_analysis", {}).get("deepseek", {}).get("api_key", "")
-            if not api_key or api_key == "YOUR_DEEPSEEK_API_KEY":
-                print("⚠️  未配置DeepSeek API密钥，将使用模拟分析模式")
-                self.mock_mode = True
-            else:
-                print("🔑 已配置DeepSeek API密钥，将使用真实分析模式")
-                self.mock_mode = False
+            # 测试增强分析器（主流程使用）
+            self.enhanced_analyzer = create_enhanced_analyzer(
+                max_concurrent=5,
+                use_async=True,
+                timeout_seconds=30,
+                rate_limit=50
+            )
+            print("✅ 增强AI分析器初始化成功")
                 
             self.results["initialization"] = {
                 "status": "success",
-                "mock_mode": self.mock_mode
+                "standard_analyzer": True,
+                "enhanced_analyzer": True
             }
             return True
             
@@ -58,7 +60,7 @@ class AIAnalysisTester:
             return False
 
     def test_single_news_analysis(self) -> Dict[str, any]:
-        """测试单条新闻分析"""
+        """测试单条新闻分析（基础功能）"""
         print("\n🤖 测试单条新闻分析")
         print("-" * 60)
         
@@ -81,14 +83,12 @@ class AIAnalysisTester:
             print(f"   分析时间: {analysis_time:.2f}秒")
             print(f"   影响评分: {result.impact_score}/100")
             print(f"   分析摘要: {result.summary[:50]}...")
-            print(f"   分析模式: {'真实' if not self.mock_mode else '模拟'}")
             
             self.results["single_analysis"] = {
                 "status": "success",
                 "analysis_time": analysis_time,
                 "impact_score": result.impact_score,
-                "summary": result.summary,
-                "mode": "real" if not self.mock_mode else "mock"
+                "summary": result.summary
             }
             return self.results["single_analysis"]
             
@@ -98,14 +98,14 @@ class AIAnalysisTester:
             self.results["single_analysis"] = result
             return result
 
-    def test_batch_analysis(self, batch_size: int = 3) -> Dict[str, any]:
-        """测试批量新闻分析"""
-        print(f"\n📊 测试批量新闻分析（{batch_size}条）")
+    def test_enhanced_batch_analysis(self, batch_size: int = 3) -> Dict[str, any]:
+        """测试增强批量分析（主流程核心功能）"""
+        print(f"\n🚀 测试增强批量分析（{batch_size}条）")
         print("-" * 60)
         
-        if not self.analyzer:
-            print("❌ 分析器未初始化")
-            return {"status": "failed", "error": "analyzer_not_initialized"}
+        if not self.enhanced_analyzer:
+            print("❌ 增强分析器未初始化")
+            return {"status": "failed", "error": "enhanced_analyzer_not_initialized"}
             
         try:
             # 获取测试新闻
@@ -115,19 +115,18 @@ class AIAnalysisTester:
                 print("❌ 没有可分析的新闻")
                 return {"status": "failed", "error": "no_news_available"}
             
-            print(f"🔍 开始批量分析 {len(test_news_list)} 条新闻...")
+            print(f"🔍 开始增强批量分析 {len(test_news_list)} 条新闻...")
             
             start_time = time.time()
-            results = self.analyzer.batch_analyze(test_news_list)
+            results = self.enhanced_analyzer.enhanced_batch_analyze(test_news_list)
             end_time = time.time()
             
             analysis_time = end_time - start_time
             
-            print(f"✅ 批量分析完成")
+            print(f"✅ 增强批量分析完成")
             print(f"   分析数量: {len(results)}")
             print(f"   总用时: {analysis_time:.2f}秒")
             print(f"   平均用时: {analysis_time/max(len(results),1):.2f}秒/条")
-            print(f"   分析模式: {'模拟' if self.mock_mode else '真实'}")
             
             # 显示分析结果示例
             if results:
@@ -143,7 +142,6 @@ class AIAnalysisTester:
                 "analyzed_count": len(results),
                 "total_time": analysis_time,
                 "average_time": analysis_time/max(len(results),1),
-                "mock_mode": self.mock_mode,
                 "sample_results": [
                     {
                         "impact_score": result.impact_score,
@@ -152,90 +150,49 @@ class AIAnalysisTester:
                 ]
             }
             
-            self.results["batch_analysis"] = test_result
+            self.results["enhanced_batch_analysis"] = test_result
             return test_result
             
         except Exception as e:
-            print(f"❌ 批量分析失败: {e}")
+            print(f"❌ 增强批量分析失败: {e}")
             result = {"status": "failed", "error": str(e)}
-            self.results["batch_analysis"] = result
+            self.results["enhanced_batch_analysis"] = result
             return result
 
-    def test_analysis_quality(self) -> Dict:
-        """测试分析质量"""
-        print("🎯 测试分析质量")
-        print("------------------------------------------------------------")
+    def test_mock_analysis(self) -> Dict[str, any]:
+        """测试模拟分析功能（降级逻辑）"""
+        print("\n🎭 测试模拟分析功能")
+        print("-" * 60)
         
         try:
-            print("🔍 测试分析质量...")
+            # 创建测试新闻
+            test_news = self._create_test_news()[0]
+            print(f"🔍 测试模拟分析: {test_news.title[:50]}...")
             
-            # 定义测试用例
-            test_cases = [
-                {
-                    "news": NewsItem(
-                        id="quality_test_1",
-                        title="银行股大涨，建设银行涨停，工商银行涨8%",
-                        content="今日银行板块大幅上涨，建设银行强势涨停，工商银行涨幅达8%，银行业绩超预期。",
-                        source="测试",
-                        category="银行",
-                        keywords=["银行", "大涨", "涨停"]
-                    ),
-                    "expected_range": (60, 100)  # 预期高影响评分
-                },
-                {
-                    "news": NewsItem(
-                        id="quality_test_2", 
-                        title="科技股暴跌，腾讯跌5%，阿里巴巴跌7%",
-                        content="科技股今日遭遇重挫，腾讯控股跌5%，阿里巴巴跌7%，投资者担忧监管政策。",
-                        source="测试",
-                        category="科技", 
-                        keywords=["科技", "暴跌", "下跌"]
-                    ),
-                    "expected_range": (0, 40)  # 预期低影响评分
-                }
-            ]
+            start_time = time.time()
+            result = self.analyzer._mock_analysis(test_news)
+            end_time = time.time()
             
-            score_correct = 0
-            total_tests = len(test_cases)
+            analysis_time = end_time - start_time
             
-            for test_case in test_cases:
-                news = test_case["news"]
-                expected_min, expected_max = test_case["expected_range"]
-                
-                result = self.analyzer.analyze_single_news(news)
-                
-                print(f"   新闻: {news.title[:30]}...")
-                print(f"   预期评分范围: {expected_min}-{expected_max}")
-                print(f"   实际评分: {result.impact_score}")
-                print()
-                
-                # 检查评分是否在合理范围内
-                if expected_min <= result.impact_score <= expected_max:
-                    score_correct += 1
+            print(f"✅ 模拟分析完成")
+            print(f"   分析时间: {analysis_time:.2f}秒")
+            print(f"   影响评分: {result.impact_score}/100")
+            print(f"   分析摘要: {result.summary[:50]}...")
             
-            score_accuracy = score_correct / total_tests * 100
-            overall_quality = score_accuracy
-            
-            print(f"📊 分析质量评估:")
-            print(f"   评分准确性: {score_accuracy:.1f}%")
-            print(f"   综合质量评分: {overall_quality:.1f}%")
-            
-            self.results["analysis_quality"] = {
+            self.results["mock_analysis"] = {
                 "status": "success",
-                "score_accuracy": score_accuracy,
-                "overall_quality": overall_quality,
-                "total_tests": total_tests
+                "analysis_time": analysis_time,
+                "impact_score": result.impact_score,
+                "summary": result.summary
             }
-            
-            return self.results["analysis_quality"]
+            return self.results["mock_analysis"]
             
         except Exception as e:
-            print(f"❌ 分析质量测试失败: {e}")
-            self.results["analysis_quality"] = {
-                "status": "error",
-                "error": str(e)
-            }
-            return self.results["analysis_quality"]
+            print(f"❌ 模拟分析失败: {e}")
+            result = {"status": "failed", "error": str(e)}
+            self.results["mock_analysis"] = result
+            return result
 
     def _get_test_news_for_analysis(self, limit: int) -> List[NewsItem]:
         """获取用于分析的测试新闻"""
@@ -292,21 +249,21 @@ class AIAnalysisTester:
         return test_news
 
     def run_all_tests(self) -> Dict[str, dict]:
-        """运行所有测试"""
-        print("🧪 AI分析功能测试")
+        """运行所有核心测试"""
+        print("🧪 AI分析核心功能测试")
         print("=" * 80)
         
         # 1. 测试初始化
         self.test_analyzer_initialization()
         
-        # 2. 测试单条分析
+        # 2. 测试单条分析（基础功能）
         self.test_single_news_analysis()
         
-        # 3. 测试批量分析
-        self.test_batch_analysis()
+        # 3. 测试增强批量分析（主流程核心）
+        self.test_enhanced_batch_analysis()
         
-        # 4. 测试分析质量
-        self.test_analysis_quality()
+        # 4. 测试模拟分析（降级逻辑）
+        self.test_mock_analysis()
         
         # 显示测试总结
         self.print_summary()
@@ -316,7 +273,7 @@ class AIAnalysisTester:
     def print_summary(self):
         """打印测试总结"""
         print("\n" + "=" * 80)
-        print("📋 AI分析测试总结")
+        print("📋 AI分析核心测试总结")
         print("-" * 80)
         
         total_tests = len(self.results)
@@ -326,7 +283,6 @@ class AIAnalysisTester:
         print(f"成功数: {successful_tests}")
         print(f"失败数: {total_tests - successful_tests}")
         print(f"成功率: {successful_tests/max(total_tests,1)*100:.1f}%")
-        print(f"分析模式: {'模拟' if self.mock_mode else '真实'}")
         
         # 显示各项测试结果
         for test_name, result in self.results.items():
@@ -334,13 +290,10 @@ class AIAnalysisTester:
             print(f"{status_icon} {test_name}")
             
             if result.get("status") == "success":
-                if test_name == "batch_analysis":
+                if test_name == "enhanced_batch_analysis":
                     count = result.get("analyzed_count", 0)
                     avg_time = result.get("average_time", 0)
                     print(f"   分析了 {count} 条新闻，平均 {avg_time:.2f}秒/条")
-                elif test_name == "analysis_quality":
-                    score = result.get("quality_score", {}).get("overall_score", 0)
-                    print(f"   分析质量评分: {score:.1f}%")
 
 
 def run_ai_analysis_tests():

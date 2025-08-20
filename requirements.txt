@@ -47,6 +47,9 @@ aiofiles>=23.2.0
 # 重试机制和错误处理（并发分析需要）
 tenacity>=8.2.0
 
+# 进程管理和系统监控
+psutil>=5.9.0
+
 # 开发依赖
 pytest>=7.4.0
 pytest-asyncio>=0.21.1

@@ -1,9 +1,11 @@
 """
 定时调度模块
 实现自动化的新闻收集、AI分析和邮件发送任务调度
+包含高级管理、监控和错误恢复功能
 """
 
 import os
+import json
 import time
 import threading
 from datetime import datetime, timedelta
@@ -15,6 +17,8 @@ from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 import yaml
 import signal
 import sys
+from pathlib import Path
+import pickle
 
 from .collectors.news_collector import NewsCollector
 from .ai.ai_analyzer import AIAnalyzer, create_enhanced_analyzer, BatchAnalysisConfig
@@ -27,19 +31,42 @@ logger = get_logger('scheduler')
 
 
 class TaskScheduler:
-    """任务调度器"""
+    """任务调度器 - 集成管理、监控和错误恢复功能"""
     
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, state_file: str = None):
         """
         初始化任务调度器
         
         Args:
             config_path: 配置文件路径
+            state_file: 状态保存文件路径
         """
         self.config = self._load_config(config_path)
         self.scheduler = BackgroundScheduler(timezone='Asia/Shanghai')
         self.is_running = False
         self.jobs = {}
+        
+        # 管理器功能 - 状态管理
+        self.config_path = config_path
+        self.state_file = state_file or 'data/scheduler_state.json'
+        self.start_time = None
+        self.error_count = 0
+        self.last_error_time = None
+        
+        # 任务执行历史
+        self.execution_history = []
+        self.max_history_size = 100
+        
+        # 健康监控
+        self.health_status = {
+            'overall': 'unknown',
+            'components': {},
+            'last_check': None
+        }
+        
+        # 监控线程
+        self.monitor_thread = None
+        self.monitor_interval = 60  # 监控间隔（秒）
         
         # 统计信息
         self.stats = {
@@ -58,10 +85,8 @@ class TaskScheduler:
         self.importance_analyzer = None
         self.email_sender = None
         
-        # 设置事件监听器
+        # 设置事件监听器和信号处理器
         self._setup_event_listeners()
-        
-        # 设置信号处理器
         self._setup_signal_handlers()
     
     def _load_config(self, config_path: Optional[str]) -> dict:
@@ -108,6 +133,12 @@ class TaskScheduler:
     def _signal_handler(self, signum, frame):
         """信号处理器"""
         logger.info(f"接收到信号 {signum}，正在优雅关闭...")
+        
+        # 确保状态正确保存
+        self.is_running = False
+        self.record_event('signal_received', True, f"接收到信号 {signum}，开始关闭")
+        self.save_state()
+        
         self.stop()
         sys.exit(0)
     
@@ -119,9 +150,374 @@ class TaskScheduler:
         if event.exception:
             self.stats['failed_executions'] += 1
             logger.error(f"任务执行失败: {event.job_id}, 异常: {event.exception}")
+            # 记录错误事件
+            self.record_event('job_failed', False, f"任务 {event.job_id} 执行失败: {event.exception}")
         else:
             self.stats['successful_executions'] += 1
             logger.info(f"任务执行成功: {event.job_id}")
+            # 记录成功事件
+            self.record_event('job_executed', True, f"任务 {event.job_id} 执行成功")
+    
+    # ===== 状态管理功能 =====
+    
+    def save_state(self):
+        """保存调度器状态"""
+        try:
+            # 确保目录存在
+            state_dir = os.path.dirname(self.state_file)
+            if state_dir:
+                os.makedirs(state_dir, exist_ok=True)
+            
+            state = {
+                'is_running': self.is_running,
+                'start_time': self.start_time,
+                'error_count': self.error_count,
+                'last_error_time': self.last_error_time,
+                'execution_history': self.execution_history[-50:],  # 只保存最近50条
+                'health_status': self.health_status,
+                'stats': self.stats,
+                'saved_at': datetime.now().isoformat(),
+                'process_id': os.getpid(),  # 添加进程ID
+                'save_reason': 'normal_operation'  # 保存原因
+            }
+            
+            # 原子性写入：先写到临时文件，然后重命名
+            temp_file = self.state_file + '.tmp'
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+            
+            # 原子性移动
+            if os.path.exists(self.state_file):
+                backup_file = self.state_file + '.backup'
+                if os.path.exists(backup_file):
+                    os.remove(backup_file)
+                os.rename(self.state_file, backup_file)
+            
+            os.rename(temp_file, self.state_file)
+                
+            logger.debug(f"调度器状态已保存 (PID: {os.getpid()})")
+            
+        except Exception as e:
+            logger.error(f"保存状态失败: {e}")
+            # 尝试清理临时文件
+            try:
+                temp_file = self.state_file + '.tmp'
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except:
+                pass
+    
+    def load_state(self):
+        """加载调度器状态"""
+        try:
+            if not os.path.exists(self.state_file):
+                logger.info("状态文件不存在，使用默认状态")
+                return
+            
+            with open(self.state_file, 'r', encoding='utf-8') as f:
+                state = json.load(f)
+            
+            self.error_count = state.get('error_count', 0)
+            self.last_error_time = state.get('last_error_time')
+            self.execution_history = state.get('execution_history', [])
+            self.health_status = state.get('health_status', {
+                'overall': 'unknown',
+                'components': {},
+                'last_check': None
+            })
+            
+            # 恢复统计信息
+            saved_stats = state.get('stats', {})
+            for key, value in saved_stats.items():
+                if key in self.stats:
+                    self.stats[key] = value
+            
+            logger.info("调度器状态已加载")
+            
+        except Exception as e:
+            logger.error(f"加载状态失败: {e}")
+    
+    def record_event(self, event_type: str, success: bool, message: str):
+        """记录事件"""
+        event = {
+            'timestamp': datetime.now().isoformat(),
+            'type': event_type,
+            'success': success,
+            'message': message
+        }
+        
+        self.execution_history.append(event)
+        
+        # 限制历史记录数量
+        if len(self.execution_history) > self.max_history_size:
+            self.execution_history = self.execution_history[-self.max_history_size:]
+        
+        logger.debug(f"记录事件: {event_type} - {message}")
+    
+    # ===== 监控功能 =====
+    
+    def start_monitoring(self):
+        """启动监控线程"""
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            return
+        
+        self.monitor_thread = threading.Thread(
+            target=self._monitor_loop,
+            daemon=True,
+            name="SchedulerMonitor"
+        )
+        self.monitor_thread.start()
+        
+        logger.info("监控线程已启动")
+    
+    def stop_monitoring(self):
+        """停止监控线程"""
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            # 监控线程会在下一个循环检查is_running状态
+            logger.info("监控线程将在下次检查时停止")
+    
+    def _monitor_loop(self):
+        """监控循环"""
+        while self.is_running:
+            try:
+                # 执行健康检查
+                self.check_health()
+                
+                # 检查错误恢复
+                self.check_error_recovery()
+                
+                # 保存状态
+                self.save_state()
+                
+                # 等待下次检查
+                time.sleep(self.monitor_interval)
+                
+            except Exception as e:
+                logger.error(f"监控循环错误: {e}")
+                time.sleep(30)  # 出错时等待更长时间
+    
+    def check_health(self):
+        """健康检查"""
+        try:
+            logger.debug("执行健康检查...")
+            
+            # 检查调度器状态
+            scheduler_healthy = self.is_running
+            
+            # 检查组件状态
+            components_status = {
+                'scheduler': scheduler_healthy,
+                'news_collector': self.news_collector is not None,
+                'ai_analyzer': self.ai_analyzer is not None,
+                'email_sender': self.email_sender is not None
+            }
+            
+            # 检查任务执行状态
+            recent_failures = self.stats.get('failed_executions', 0)
+            total_executions = self.stats.get('total_executions', 0)
+            
+            # 计算健康分数
+            failure_rate = recent_failures / max(total_executions, 1)
+            
+            if failure_rate > 0.5:
+                overall_status = 'critical'
+            elif failure_rate > 0.2:
+                overall_status = 'warning'
+            elif all(components_status.values()):
+                overall_status = 'healthy'
+            else:
+                overall_status = 'degraded'
+            
+            self.health_status = {
+                'overall': overall_status,
+                'components': components_status,
+                'last_check': datetime.now().isoformat(),
+                'failure_rate': failure_rate,
+                'stats': self.stats.copy()
+            }
+            
+            # 记录健康状态变化
+            if overall_status != 'healthy':
+                self.record_event(
+                    'health_check',
+                    overall_status == 'healthy',
+                    f"健康状态: {overall_status}, 失败率: {failure_rate:.2%}"
+                )
+            
+            logger.debug(f"健康检查完成: {overall_status}")
+            
+        except Exception as e:
+            logger.error(f"健康检查失败: {e}")
+            self.health_status['overall'] = 'error'
+    
+    def check_error_recovery(self):
+        """检查是否需要错误恢复"""
+        try:
+            # 如果健康状态为critical，考虑重启
+            if self.health_status.get('overall') == 'critical':
+                logger.warning("检测到严重健康问题，考虑重启调度器")
+                
+                # 检查最近是否已经重启过
+                recent_restarts = [
+                    event for event in self.execution_history[-10:]
+                    if event.get('type') == 'scheduler_restarted'
+                    and datetime.fromisoformat(event['timestamp']) > datetime.now() - timedelta(hours=1)
+                ]
+                
+                if len(recent_restarts) < 3:  # 1小时内最多重启3次
+                    logger.info("执行自动恢复重启...")
+                    self.restart()
+                    self.record_event('scheduler_restarted', True, "自动恢复重启")
+                else:
+                    logger.error("重启次数过多，停止自动恢复")
+                    self.record_event('auto_recovery_disabled', False, "重启次数超限")
+            
+        except Exception as e:
+            logger.error(f"错误恢复检查失败: {e}")
+    
+    # ===== 仪表板和状态功能 =====
+    
+    def get_dashboard_data(self) -> Dict[str, Any]:
+        """获取仪表板数据"""
+        return {
+            'manager_status': {
+                'is_running': self.is_running,
+                'start_time': self.start_time,
+                'uptime': self._calculate_uptime(),
+                'error_count': self.error_count,
+                'last_error_time': self.last_error_time
+            },
+            'scheduler_stats': self.stats.copy(),
+            'health_status': self.health_status,
+            'recent_events': self.execution_history[-10:],
+            'jobs_info': self._get_jobs_info()
+        }
+    
+    def _calculate_uptime(self) -> Optional[str]:
+        """计算运行时间"""
+        if not self.start_time:
+            return None
+        
+        start_dt = datetime.fromisoformat(self.start_time)
+        uptime = datetime.now() - start_dt
+        
+        days = uptime.days
+        hours, remainder = divmod(uptime.seconds, 3600)
+        minutes, _ = divmod(remainder, 60)
+        
+        return f"{days}天 {hours}小时 {minutes}分钟"
+    
+    def _get_jobs_info(self) -> List[Dict[str, Any]]:
+        """获取任务信息"""
+        try:
+            jobs_info = []
+            
+            for job in self.scheduler.get_jobs():
+                jobs_info.append({
+                    'id': job.id,
+                    'name': job.name,
+                    'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
+                    'trigger': str(job.trigger)
+                })
+            
+            return jobs_info
+            
+        except Exception as e:
+            logger.error(f"获取任务信息失败: {e}")
+            return []
+    
+    def get_status(self) -> Dict[str, Any]:
+        """获取调度器状态（兼容性方法）"""
+        try:
+            dashboard = self.get_dashboard_data()
+            
+            # 简化状态信息
+            jobs_list = []
+            for job in dashboard['jobs_info']:
+                jobs_list.append(f"{job['name']} (下次执行: {job.get('next_run_time', '未知')})")
+            
+            return {
+                'running': self.is_running,
+                'start_time': self.start_time,
+                'uptime': dashboard['manager_status']['uptime'],
+                'job_count': len(dashboard['jobs_info']),
+                'jobs': jobs_list,
+                'health': dashboard['health_status']['overall'],
+                'error_count': self.error_count
+            }
+        except Exception as e:
+            logger.error(f"获取状态失败: {e}")
+            return {
+                'running': False,
+                'error': str(e)
+            }
+    
+    def run_with_ui(self):
+        """运行调度器并显示状态信息"""
+        try:
+            logger.info("启动调度器监控模式...")
+            
+            while self.is_running:
+                # 清屏并显示状态
+                os.system('cls' if os.name == 'nt' else 'clear')
+                
+                print("=" * 80)
+                print("📊 AI新闻收集与影响分析系统 - 调度器监控")
+                print("=" * 80)
+                
+                dashboard = self.get_dashboard_data()
+                
+                # 显示管理器状态
+                print(f"\n🔧 管理器状态:")
+                print(f"  运行状态: {'🟢 运行中' if self.is_running else '🔴 已停止'}")
+                print(f"  运行时间: {dashboard['manager_status']['uptime'] or '未知'}")
+                print(f"  错误次数: {dashboard['manager_status']['error_count']}")
+                
+                # 显示健康状态
+                health = dashboard['health_status']
+                status_emoji = {
+                    'healthy': '🟢',
+                    'warning': '🟡',
+                    'critical': '🔴',
+                    'error': '⚫'
+                }.get(health.get('overall', 'unknown'), '❓')
+                
+                print(f"\n💊 健康状态: {status_emoji} {health.get('overall', '未知')}")
+                
+                # 显示调度器统计
+                stats = dashboard['scheduler_stats']
+                print(f"\n📈 执行统计:")
+                print(f"  总执行次数: {stats.get('total_executions', 0)}")
+                print(f"  成功次数: {stats.get('successful_executions', 0)}")
+                print(f"  失败次数: {stats.get('failed_executions', 0)}")
+                print(f"  上次执行: {stats.get('last_execution_time', '未知')}")
+                
+                # 显示活动任务
+                jobs = dashboard['jobs_info']
+                print(f"\n⏰ 活动任务 ({len(jobs)}个):")
+                for job in jobs:
+                    next_run = job['next_run_time']
+                    if next_run:
+                        next_run = datetime.fromisoformat(next_run).strftime('%H:%M:%S')
+                    print(f"  📋 {job['name']} - 下次执行: {next_run or '未知'}")
+                
+                # 显示最近事件
+                events = dashboard['recent_events']
+                print(f"\n📝 最近事件:")
+                for event in events[-5:]:
+                    timestamp = datetime.fromisoformat(event['timestamp']).strftime('%H:%M:%S')
+                    status = '✅' if event['success'] else '❌'
+                    print(f"  {timestamp} {status} {event['message']}")
+                
+                print(f"\n按 Ctrl+C 停止调度器")
+                print("=" * 80)
+                
+                time.sleep(5)  # 每5秒刷新一次
+                
+        except KeyboardInterrupt:
+            print("\n接收到停止信号...")
+        finally:
+            self.stop()
     
     def initialize_components(self):
         """初始化组件"""
@@ -932,9 +1328,10 @@ class TaskScheduler:
              enable_email: bool = True,
              enable_full_pipeline: bool = False,
              enable_enhanced_strategy: bool = False,
-             enable_maintenance: bool = True):
+             enable_maintenance: bool = True,
+             enable_monitoring: bool = True):
         """
-        启动调度器
+        启动调度器（增强版 - 包含监控和错误恢复）
         
         Args:
             enable_news_collection: 是否启用新闻收集任务
@@ -943,9 +1340,13 @@ class TaskScheduler:
             enable_full_pipeline: 是否启用完整流程任务
             enable_enhanced_strategy: 是否启用增强版调度策略
             enable_maintenance: 是否启用维护任务
+            enable_monitoring: 是否启用监控功能
         """
         try:
-            logger.info("正在启动任务调度器...")
+            logger.info("正在启动任务调度器（增强版）...")
+            
+            # 加载状态
+            self.load_state()
             
             # 初始化组件
             if not self.initialize_components():
@@ -983,12 +1384,20 @@ class TaskScheduler:
             # 启动调度器
             self.scheduler.start()
             self.is_running = True
-            self.stats['uptime_start'] = datetime.now().isoformat()
+            self.start_time = datetime.now().isoformat()
+            self.stats['uptime_start'] = self.start_time
+            
+            # 启动监控线程
+            if enable_monitoring:
+                self.start_monitoring()
+            
+            # 记录启动事件
+            self.record_event('scheduler_started', True, "调度器启动成功")
             
             # 更新下次执行时间
             self._update_next_execution_time()
             
-            logger.info("任务调度器启动成功")
+            logger.info("任务调度器启动成功（增强版）")
             logger.info(f"已添加 {len(self.jobs)} 个任务")
             
             # 显示任务列表
@@ -998,34 +1407,85 @@ class TaskScheduler:
             
         except Exception as e:
             logger.error(f"启动调度器失败: {e}")
+            self.error_count += 1
+            self.last_error_time = datetime.now().isoformat()
+            self.record_event('scheduler_start_failed', False, f"启动失败: {e}")
             return False
     
     def stop(self):
-        """停止调度器"""
+        """停止调度器（增强版 - 包含优雅停止）"""
         try:
-            logger.info("正在停止任务调度器...")
+            logger.info("正在优雅停止任务调度器...")
             
+            # 首先设置运行状态为False
+            self.is_running = False
+            
+            # 停止监控
+            self.stop_monitoring()
+            
+            # 停止调度器
             if self.scheduler.running:
                 self.scheduler.shutdown(wait=True)
             
-            self.is_running = False
-            logger.info("任务调度器已停止")
+            # 记录停止事件
+            self.record_event('scheduler_stopped', True, "调度器正常停止")
+            
+            # 保存最终状态
+            self.save_state()
+            
+            logger.info("任务调度器已优雅停止")
             
         except Exception as e:
             logger.error(f"停止调度器失败: {e}")
+            # 即使出错也要保存状态
+            self.is_running = False
+            self.record_event('scheduler_stop_error', False, f"停止时出错: {e}")
+            self.save_state()
     
+    def restart(self, **kwargs):
+        """重启调度器"""
+        logger.info("重启调度器...")
+        
+        self.stop()
+        time.sleep(2)  # 等待完全停止
+        
+        return self.start(**kwargs)
+    
+    def wait(self):
+        """等待调度器停止（兼容性方法）"""
+        try:
+            while self.is_running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("收到停止信号")
+            raise
+    
+    # ===== 兼容性方法 =====
+    
+    def start_with_recovery(self, **kwargs):
+        """启动调度器（兼容性方法）"""
+        return self.start(**kwargs)
+    
+    def stop_gracefully(self):
+        """优雅停止调度器（兼容性方法）"""
+        self.stop()
+    
+    def restart_scheduler(self, **kwargs):
+        """重启调度器（兼容性方法）"""
+        return self.restart(**kwargs)
+
     def pause(self):
         """暂停调度器"""
         if self.scheduler.running:
             self.scheduler.pause()
             logger.info("任务调度器已暂停")
-    
+
     def resume(self):
         """恢复调度器"""
         if self.scheduler.running:
             self.scheduler.resume()
             logger.info("任务调度器已恢复")
-    
+
     def run_job_once(self, job_id: str):
         """立即执行指定任务"""
         try:
@@ -1041,7 +1501,7 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"执行任务失败: {job_id}, 错误: {e}")
             return False
-    
+
     def print_jobs(self):
         """打印任务列表"""
         if not self.scheduler.get_jobs():
@@ -1055,7 +1515,7 @@ class TaskScheduler:
             logger.info(f"  下次执行: {next_run}")
             logger.info(f"  触发器: {job.trigger}")
             logger.info("")
-    
+
     def _update_next_execution_time(self):
         """更新下次执行时间"""
         next_times = []
@@ -1066,7 +1526,7 @@ class TaskScheduler:
         if next_times:
             earliest = min(next_times)
             self.stats['next_execution_time'] = earliest.isoformat()
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """获取调度器统计信息"""
         self._update_next_execution_time()
@@ -1077,7 +1537,7 @@ class TaskScheduler:
             'active_jobs_count': len(self.scheduler.get_jobs()) if self.scheduler else 0,
             'scheduler_state': 'running' if self.is_running else 'stopped'
         }
-    
+
     def run_forever(self):
         """持续运行调度器"""
         try:
@@ -1096,6 +1556,16 @@ def create_default_scheduler() -> TaskScheduler:
     """创建默认配置的调度器"""
     scheduler = TaskScheduler()
     return scheduler
+
+
+# 向后兼容性别名
+def create_scheduler_manager(config_path: str = None) -> TaskScheduler:
+    """创建调度器管理器实例（兼容性别名）"""
+    return TaskScheduler(config_path)
+
+
+# 兼容性类别名
+SchedulerManager = TaskScheduler
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ from test_news_collection import run_news_collection_tests
 from test_ai_analysis import run_ai_analysis_tests
 from test_database import run_database_tests
 
-# 并发分析功能已集成到主AI分析器中，无需单独测试模块
+# 并发分析功能已集成到主AI分析器中，测试已简化至核心功能
 CONCURRENT_AVAILABLE = False
 
 
@@ -79,8 +79,8 @@ class TestRunner:
             return {}
     
     def run_ai_analysis_tests(self) -> Dict[str, dict]:
-        """运行AI分析测试"""
-        print("\n🤖 运行AI分析测试")
+        """运行AI分析测试（核心功能）"""
+        print("\n🤖 运行AI分析测试（核心功能）")
         print("=" * 80)
         
         try:
@@ -140,7 +140,7 @@ class TestRunner:
         # 3. 新闻收集测试
         self.run_news_collection_tests()
         
-        # 4. AI分析测试（包含并发功能测试）
+        # 4. AI分析测试（包含核心功能和并发测试）
         self.run_ai_analysis_tests()
         
         self.end_time = time.time()
@@ -210,7 +210,7 @@ class TestRunner:
             module_display_name = {
                 "api_tests": "API数据源测试",
                 "news_collection_tests": "新闻收集测试", 
-                "ai_analysis_tests": "AI分析测试",
+                "ai_analysis_tests": "AI分析核心功能测试",
                 "database_tests": "数据库测试"
             }.get(module_name, module_name)
             
@@ -276,7 +276,7 @@ def main():
 测试模块说明:
   api         - 测试API数据源连接和数据获取
   collection  - 测试新闻收集功能
-  analysis    - 测试AI分析功能
+  analysis    - 测试AI分析核心功能（已简化）
 
   database    - 测试数据库操作
   all         - 运行所有测试（默认）

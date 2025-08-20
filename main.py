@@ -19,11 +19,11 @@ logger = get_logger("main")
 def start_scheduler_daemon():
     """启动调度器守护进程"""
     try:
-        from src.scheduler_manager import SchedulerManager
+        from src.scheduler import TaskScheduler
         
         logger.info("启动调度器守护进程...")
         
-        manager = SchedulerManager()
+        manager = TaskScheduler()
         
         # 启用增强版调度策略
         manager.start(
@@ -49,22 +49,29 @@ def start_scheduler_daemon():
 def start_scheduler_background():
     """后台启动调度器"""
     try:
-        from src.scheduler_manager import SchedulerManager
+        from src.scheduler import TaskScheduler
         
         logger.info("后台启动调度器...")
         
-        manager = SchedulerManager()
+        manager = TaskScheduler()
         
         # 启用增强版调度策略
         manager.start(
             enable_enhanced_strategy=True,
             enable_full_pipeline=False,
             enable_analysis=False,
-            enable_email=False,
-            daemon=True
+            enable_email=False
         )
         
         logger.info("调度器已在后台启动")
+        
+        # 保持进程运行
+        try:
+            manager.wait()
+        except KeyboardInterrupt:
+            logger.info("收到停止信号，正在关闭调度器...")
+            manager.stop()
+            logger.info("调度器已停止")
         
     except Exception as e:
         logger.error(f"后台启动调度器失败: {e}")
@@ -73,24 +80,149 @@ def start_scheduler_background():
 def scheduler_status():
     """查看调度器状态"""
     try:
-        from src.scheduler_manager import SchedulerManager
+        from src.scheduler import TaskScheduler
+        import psutil
+        import json
+        import os
         
-        manager = SchedulerManager()
-        status = manager.get_status()
+        # 创建临时实例来访问状态文件
+        temp_manager = TaskScheduler()
         
-        print("📊 调度器状态:")
-        print(f"   运行状态: {status.get('running', 'Unknown')}")
-        print(f"   启动时间: {status.get('start_time', 'N/A')}")
-        print(f"   任务数量: {status.get('job_count', 0)}")
+        # 方法1：检查状态文件
+        status_from_file = {}
+        state_file = temp_manager.state_file
+        if os.path.exists(state_file):
+            try:
+                with open(state_file, 'r', encoding='utf-8') as f:
+                    state_data = json.load(f)
+                    status_from_file = {
+                        'file_running': state_data.get('is_running', False),
+                        'start_time': state_data.get('start_time', 'N/A'),
+                        'error_count': state_data.get('error_count', 0),
+                        'last_saved': state_data.get('saved_at', 'N/A'),
+                        'process_id': state_data.get('process_id'),
+                        'next_execution': state_data.get('stats', {}).get('next_execution_time', 'N/A')
+                    }
+                    
+                    # 检查进程ID是否仍在运行
+                    if status_from_file['process_id']:
+                        try:
+                            process = psutil.Process(status_from_file['process_id'])
+                            if process.is_running():
+                                status_from_file['pid_running'] = True
+                                status_from_file['pid_cmdline'] = ' '.join(process.cmdline())
+                            else:
+                                status_from_file['pid_running'] = False
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            status_from_file['pid_running'] = False
+                    else:
+                        status_from_file['pid_running'] = False
+                        
+            except Exception as e:
+                logger.warning(f"读取状态文件失败: {e}")
         
-        jobs = status.get('jobs', [])
-        if jobs:
-            print("   活动任务:")
-            for job in jobs:
-                print(f"     - {job}")
+        # 方法2：检查运行中的进程
+        python_processes = []
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+                try:
+                    cmdline = proc.info.get('cmdline', [])
+                    if (cmdline and 
+                        any('python' in str(cmd).lower() for cmd in cmdline) and
+                        any('main.py' in str(cmd) for cmd in cmdline) and
+                        any(cmd in ['start', 'daemon', 'background'] for cmd in cmdline)):
+                        
+                        python_processes.append({
+                            'pid': proc.info['pid'],
+                            'cmdline': ' '.join(cmdline),
+                            'running_time': proc.info.get('create_time', 0)
+                        })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            logger.warning(f"进程检查失败: {e}")
+        
+        # 显示状态信息
+        print("📊 调度器状态检查:")
+        print("=" * 50)
+        
+        # 状态文件信息
+        if status_from_file:
+            print("📁 状态文件信息:")
+            print(f"   文件状态: {'🟢 运行中' if status_from_file['file_running'] else '🔴 已停止'}")
+            print(f"   启动时间: {status_from_file['start_time']}")
+            print(f"   进程ID: {status_from_file.get('process_id', 'N/A')}")
+            
+            # 进程ID检查结果
+            if status_from_file.get('process_id'):
+                if status_from_file.get('pid_running'):
+                    print(f"   进程状态: 🟢 运行中")
+                    print(f"   进程命令: {status_from_file.get('pid_cmdline', 'N/A')}")
+                else:
+                    print(f"   进程状态: 🔴 已退出")
+            
+            print(f"   错误计数: {status_from_file['error_count']}")
+            print(f"   下次执行: {status_from_file.get('next_execution', 'N/A')}")
+            print(f"   最后保存: {status_from_file['last_saved']}")
+        else:
+            print("📁 状态文件: ❌ 不存在或无法读取")
+        
+        print()
+        
+        # 进程信息
+        if python_processes:
+            print("🔄 运行中的调度器进程:")
+            for proc in python_processes:
+                import datetime
+                create_time = datetime.datetime.fromtimestamp(proc['running_time'])
+                print(f"   PID: {proc['pid']}")
+                print(f"   命令: {proc['cmdline']}")
+                print(f"   启动时间: {create_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                print()
+        else:
+            print("🔄 进程检查: ❌ 未发现运行中的调度器进程")
+        
+        # 综合判断
+        file_indicates_running = status_from_file.get('file_running', False) and status_from_file.get('pid_running', False)
+        process_found = bool(python_processes)
+        is_likely_running = file_indicates_running or process_found
+        
+        if file_indicates_running and process_found:
+            overall_status = "🟢 确认运行中"
+        elif file_indicates_running or process_found:
+            overall_status = "🟡 可能运行中"
+        else:
+            overall_status = "🔴 未运行"
+            
+        print(f"🎯 综合状态: {overall_status}")
+        
+        # 获取任务信息（如果可能）
+        if status_from_file.get('file_running'):
+            try:
+                # 尝试加载状态并获取任务信息
+                temp_manager.load_state()
+                recent_events = temp_manager.execution_history[-3:]
+                if recent_events:
+                    print("\n📝 最近事件:")
+                    for event in recent_events:
+                        timestamp = event['timestamp'][:19].replace('T', ' ')
+                        status_icon = '✅' if event['success'] else '❌'
+                        print(f"   {timestamp} {status_icon} {event['message']}")
+            except Exception as e:
+                logger.debug(f"获取历史事件失败: {e}")
+        
+        # 提供操作建议
+        print("\n💡 操作建议:")
+        if not is_likely_running:
+            print("   启动调度器: python main.py start")
+            print("   后台启动: python main.py background")
+        else:
+            print("   查看日志: tail -f data/logs/app.log")
+            print("   停止进程: kill <PID>")
         
     except Exception as e:
         logger.error(f"获取调度器状态失败: {e}")
+        print("❌ 状态检查失败，请检查系统配置")
 
 
 def run_single_pipeline():
