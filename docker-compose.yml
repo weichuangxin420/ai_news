@@ -42,21 +42,6 @@ services:
     # 网络配置
     networks:
       - ai_news_network
-    
-    # 资源限制 (Docker Compose v2 兼容)
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    
-    # CPU和内存限制 (适用于docker compose up)
-    cpus: 1.0
-    mem_limit: 1g
-    memswap_limit: 1g
 
   # 可选：添加监控服务
   # watchtower:
@@ -77,8 +62,4 @@ networks:
 # 数据卷配置 (预留用于将来扩展)
 volumes:
   ai_news_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data 
+    driver: local 
