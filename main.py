@@ -214,6 +214,7 @@ def main():
 使用示例:
   python main.py start       # 启动调度器（前台运行）
   python main.py background  # 后台启动调度器
+  python main.py daemon      # 守护进程模式（适合容器）
   python main.py status      # 查看调度器状态
   python main.py run-once    # 手动执行一次完整流程
   
@@ -224,7 +225,7 @@ def main():
     
     parser.add_argument(
         "command", 
-        choices=["start", "background", "status", "run-once", "enhanced", "summary", "help"],
+        choices=["start", "background", "daemon", "status", "run-once", "enhanced", "summary", "help"],
         help="要执行的命令"
     )
     
@@ -234,6 +235,8 @@ def main():
         start_scheduler_daemon()
     elif args.command == "background":
         start_scheduler_background()
+    elif args.command == "daemon":
+        start_scheduler_daemon()  # daemon和start功能相同，适合容器环境
     elif args.command == "status":
         scheduler_status()
     elif args.command == "run-once":
