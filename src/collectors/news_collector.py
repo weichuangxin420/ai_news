@@ -18,8 +18,9 @@ import requests
 import yaml
 from bs4 import BeautifulSoup
 
-from .utils.database import NewsItem, db_manager
-from .utils.logger import get_logger
+from ..utils.database import NewsItem, db_manager
+from ..utils.logger import get_logger
+from .chinanews_rss import ChinaNewsRSSCollector
 
 logger = get_logger("news_collector")
 
@@ -61,7 +62,7 @@ class NewsCollector:
         """加载配置文件"""
         if config_path is None:
             config_path = os.path.join(
-                os.path.dirname(__file__), "../config/config.yaml"
+                os.path.dirname(__file__), "../../config/config.yaml"
             )
 
         try:
@@ -73,36 +74,48 @@ class NewsCollector:
 
     def collect_all_news(self) -> List[NewsItem]:
         """
-        从所有配置的新闻源收集新闻
+        从中国新闻网RSS源收集财经新闻
 
         Returns:
             List[NewsItem]: 收集到的新闻列表
         """
-        logger.info("开始收集新闻...")
+        logger.info("开始从中国新闻网RSS收集财经新闻...")
         all_news = []
 
-        news_config = self.config.get("news_collection", {})
-        sources = news_config.get("sources", {})
+        # 使用中国新闻网RSS收集器
+        try:
+            collector = ChinaNewsRSSCollector()
+            
+            # 获取配置的最大新闻数量
+            news_config = self.config.get("news_collection", {})
+            sources = news_config.get("sources", {})
+            rss_feeds = sources.get("rss_feeds", [])
+            
+            max_items = 50  # 默认值
+            if rss_feeds and len(rss_feeds) > 0:
+                max_items = rss_feeds[0].get("max_items", 50)
+            
+            # 收集新闻
+            raw_news = collector.fetch_news(max_items=max_items)
+            
+            # 转换为NewsItem格式
+            for news_data in raw_news:
+                try:
+                    news_item = self._convert_to_news_item(news_data)
+                    if news_item:
+                        all_news.append(news_item)
+                        self.stats['collected'] += 1
+                except Exception as e:
+                    logger.error(f"转换新闻数据失败: {e}")
+                    self.stats['errors'] += 1
+                    
+            logger.info(f"从中国新闻网RSS收集到 {len(all_news)} 条新闻")
+            
+        except Exception as e:
+            logger.error(f"RSS收集失败: {e}")
+            self.stats['errors'] += 1
 
-        # 收集RSS新闻
-        rss_feeds = sources.get("rss_feeds", [])
-        if rss_feeds:
-            rss_news = self._collect_rss_news(rss_feeds)
-            all_news.extend(rss_news)
-
-        # 收集API新闻
-        api_sources = sources.get("api_sources", {})
-        if api_sources:
-            api_news = self._collect_api_news(api_sources)
-            all_news.extend(api_news)
-
-        # 收集网页爬虫新闻（谨慎使用）
-        web_scraping = sources.get("web_scraping", [])
-        if web_scraping:
-            web_news = self._collect_web_news(web_scraping)
-            all_news.extend(web_news)
-
-        # 过滤和去重（移除关键字筛选）
+        # 仅去重，不进行关键词过滤
         filtered_news = self._deduplicate_news(all_news)
 
         # 保存到数据库
@@ -665,6 +678,50 @@ class NewsCollector:
             logger.info("=== 来源统计 ===")
             for source, count in self.stats["sources"].items():
                 logger.info(f"{source}: {count} 条")
+
+    def _convert_to_news_item(self, news_data: Dict) -> Optional[NewsItem]:
+        """
+        将RSS收集器的数据格式转换为NewsItem
+
+        Args:
+            news_data: RSS收集器返回的新闻数据
+
+        Returns:
+            NewsItem: 转换后的新闻项，如果转换失败返回None
+        """
+        try:
+            # 解析发布时间
+            publish_time = None
+            if news_data.get('published_time'):
+                try:
+                    publish_time = datetime.fromisoformat(
+                        news_data['published_time'].replace('Z', '+00:00')
+                    )
+                except Exception:
+                    logger.warning(f"时间解析失败: {news_data.get('published_time')}")
+                    publish_time = datetime.now()
+            else:
+                publish_time = datetime.now()
+
+            # 转换标签为关键词列表
+            keywords = news_data.get('tags', []) if news_data.get('tags') else []
+
+            # 创建NewsItem
+            news_item = NewsItem(
+                title=news_data.get('title', ''),
+                content=news_data.get('content', ''),
+                url=news_data.get('url', ''),
+                publish_time=publish_time,
+                source=news_data.get('source', '中国新闻网'),
+                category=news_data.get('category', '财经'),
+                keywords=keywords
+            )
+
+            return news_item
+
+        except Exception as e:
+            logger.error(f"转换新闻数据失败: {e}")
+            return None
 
     def get_stats(self) -> Dict[str, Any]:
         """

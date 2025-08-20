@@ -16,7 +16,7 @@ from typing import Dict, List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils.database import db_manager, NewsItem
-from src.ai_analyzer import AnalysisResult
+from src.ai.ai_analyzer import AnalysisResult
 from src.utils.logger import get_logger
 
 logger = get_logger("test_database")
@@ -44,6 +44,9 @@ class DatabaseTester:
         
         # 设置为测试数据库
         db_manager.db_path = self.test_db_path
+        
+        # 重新初始化测试数据库表结构
+        db_manager._init_database()
         
         print(f"   测试数据库路径: {self.test_db_path}")
 
@@ -353,12 +356,8 @@ class DatabaseTester:
         for i, news in enumerate(news_items):
             result = AnalysisResult(
                 news_id=str(news.id if hasattr(news, 'id') and news.id else i + 1),
-                affected_sectors=sectors_list[i % len(sectors_list)],
-                impact_score=7.5 + (i * 0.5),  # 7.5, 8.0, 8.5
-                impact_level="中等",
-                sentiment=sentiments[i % len(sentiments)],
+                impact_score=50 + (i * 10),  # 50, 60, 70 (0-100范围)
                 summary=f"对{news.title}的分析结果",
-                recommendation=f"建议{i+1}",
                 analysis_time=datetime.now()
             )
             results.append(result)

@@ -28,6 +28,10 @@ class NewsItem:
         url: str = "",
         category: str = "",
         keywords: List[str] = None,
+        importance_score: int = 0,
+        importance_reasoning: str = "",
+        importance_factors: List[str] = None,
+        impact_degree: str = "",  # 新增：影响程度（高/中/低）
     ):
         self.id = id
         self.title = title
@@ -37,6 +41,10 @@ class NewsItem:
         self.url = url
         self.category = category
         self.keywords = keywords or []
+        self.importance_score = importance_score
+        self.importance_reasoning = importance_reasoning
+        self.importance_factors = importance_factors or []
+        self.impact_degree = impact_degree
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
 
@@ -53,6 +61,10 @@ class NewsItem:
             "url": self.url,
             "category": self.category,
             "keywords": json.dumps(self.keywords, ensure_ascii=False),
+            "importance_score": self.importance_score,
+            "importance_reasoning": self.importance_reasoning,
+            "importance_factors": json.dumps(self.importance_factors, ensure_ascii=False),
+            "impact_degree": self.impact_degree,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -83,6 +95,20 @@ class NewsItem:
             item.keywords = json.loads(keywords_str) if keywords_str else []
         except (json.JSONDecodeError, TypeError):
             item.keywords = []
+        
+        # 处理重要性分析
+        item.importance_score = data.get("importance_score", 0)
+        item.importance_reasoning = data.get("importance_reasoning", "")
+        
+        # 处理重要性因素
+        factors_str = data.get("importance_factors", "[]")
+        try:
+            item.importance_factors = json.loads(factors_str) if factors_str else []
+        except (json.JSONDecodeError, TypeError):
+            item.importance_factors = []
+        
+        # 新增：影响程度
+        item.impact_degree = data.get("impact_degree", "")
 
         return item
 
@@ -126,6 +152,10 @@ class DatabaseManager:
                         url TEXT,
                         category TEXT,
                         keywords TEXT,
+                        importance_score INTEGER DEFAULT 0,
+                        importance_reasoning TEXT,
+                        importance_factors TEXT,
+                        impact_degree TEXT,
                         created_at TEXT,
                         updated_at TEXT
                     )
@@ -138,19 +168,21 @@ class DatabaseManager:
                     CREATE TABLE IF NOT EXISTS analysis_results (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         news_id TEXT,
-                        affected_sectors TEXT,
                         impact_score REAL,
-                        impact_level TEXT,
-                        sentiment TEXT,
                         summary TEXT,
-                        recommendation TEXT,
                         analysis_time TEXT,
                         FOREIGN KEY (news_id) REFERENCES news_items (id)
                     )
                 """
                 )
 
-                # 创建索引
+                # 增量迁移：如缺少impact_degree列则添加
+                try:
+                    cursor.execute("SELECT impact_degree FROM news_items LIMIT 1")
+                except Exception:
+                    cursor.execute("ALTER TABLE news_items ADD COLUMN impact_degree TEXT")
+
+                # 索引
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_news_publish_time ON news_items(publish_time)"
                 )
@@ -176,7 +208,7 @@ class DatabaseManager:
         保存新闻项
 
         Args:
-            news_item: 新闻项对象
+            news_item: 新闻项
 
         Returns:
             bool: 保存是否成功
@@ -195,8 +227,9 @@ class DatabaseManager:
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO news_items 
-                    (id, title, content, source, publish_time, url, category, keywords, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, title, content, source, publish_time, url, category, keywords, 
+                     importance_score, importance_reasoning, importance_factors, impact_degree, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         data["id"],
@@ -207,6 +240,10 @@ class DatabaseManager:
                         data["url"],
                         data["category"],
                         data["keywords"],
+                        data["importance_score"],
+                        data["importance_reasoning"],
+                        data["importance_factors"],
+                        data["impact_degree"],
                         data["created_at"],
                         data["updated_at"],
                     ),
@@ -248,8 +285,9 @@ class DatabaseManager:
                         cursor.execute(
                             """
                             INSERT OR REPLACE INTO news_items 
-                            (id, title, content, source, publish_time, url, category, keywords, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (id, title, content, source, publish_time, url, category, keywords, 
+                             importance_score, importance_reasoning, importance_factors, impact_degree, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                             (
                                 data["id"],
@@ -260,6 +298,10 @@ class DatabaseManager:
                                 data["url"],
                                 data["category"],
                                 data["keywords"],
+                                data["importance_score"],
+                                data["importance_reasoning"],
+                                data["importance_factors"],
+                                data["impact_degree"],
                                 data["created_at"],
                                 data["updated_at"],
                             ),
@@ -279,6 +321,58 @@ class DatabaseManager:
 
         return success_count
 
+    def get_news_items_by_date_range(self, start_date: datetime, end_date: datetime) -> List[NewsItem]:
+        """
+        获取指定日期范围内的新闻
+        
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+            
+        Returns:
+            List[NewsItem]: 新闻列表
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute(
+                    """
+                    SELECT * FROM news_items 
+                    WHERE datetime(publish_time) BETWEEN datetime(?) AND datetime(?)
+                    ORDER BY importance_score DESC, publish_time DESC
+                    """,
+                    (start_date.isoformat(), end_date.isoformat())
+                )
+                
+                rows = cursor.fetchall()
+                news_items = []
+                
+                for row in rows:
+                    data = {
+                        "id": row[0],
+                        "title": row[1],
+                        "content": row[2],
+                        "source": row[3],
+                        "publish_time": row[4],
+                        "url": row[5],
+                        "category": row[6],
+                        "keywords": row[7],
+                        "importance_score": row[8] if len(row) > 8 else 0,
+                        "importance_reasoning": row[9] if len(row) > 9 else "",
+                        "importance_factors": row[10] if len(row) > 10 else "[]",
+                        "impact_degree": row[11] if len(row) > 11 else "",
+                        "created_at": row[12] if len(row) > 12 else None,
+                        "updated_at": row[13] if len(row) > 13 else None,
+                    }
+                    news_items.append(NewsItem.from_dict(data))
+                
+                return news_items
+                
+        except Exception as e:
+            logger.error(f"获取日期范围内新闻失败: {e}")
+            return []
+    
     def get_news_items(
         self,
         limit: int = 100,
@@ -512,6 +606,102 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")
             return {}
+
+    def cleanup_old_data(self, days: int = 7) -> Dict[str, int]:
+        """
+        清理旧数据
+        
+        Args:
+            days: 保留天数，默认7天
+            
+        Returns:
+            Dict[str, int]: 清理统计信息
+        """
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days)
+            cutoff_str = cutoff_date.isoformat()
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 统计要删除的数据
+                cursor.execute(
+                    "SELECT COUNT(*) FROM news_items WHERE created_at < ?",
+                    (cutoff_str,)
+                )
+                old_news_count = cursor.fetchone()[0]
+                
+                # 删除旧新闻
+                cursor.execute(
+                    "DELETE FROM news_items WHERE created_at < ?",
+                    (cutoff_str,)
+                )
+                
+                # 删除孤立的分析结果（如果存在analysis_results表）
+                cursor.execute(
+                    """DELETE FROM analysis_results 
+                       WHERE news_id NOT IN (SELECT id FROM news_items)"""
+                )
+                old_analysis_count = cursor.rowcount
+                
+                conn.commit()
+                
+                logger.info(f"数据清理完成：删除 {old_news_count} 条新闻，{old_analysis_count} 条分析结果")
+                
+                return {
+                    "deleted_news": old_news_count,
+                    "deleted_analysis": old_analysis_count,
+                    "cutoff_date": cutoff_str
+                }
+                
+        except Exception as e:
+            logger.error(f"数据清理失败: {e}")
+            return {"deleted_news": 0, "deleted_analysis": 0, "error": str(e)}
+
+    def optimize_database(self) -> Dict[str, Any]:
+        """
+        优化数据库性能
+        
+        Returns:
+            Dict[str, Any]: 优化结果
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 获取优化前的数据库大小
+                cursor.execute("PRAGMA page_count")
+                page_count_before = cursor.fetchone()[0]
+                
+                cursor.execute("PRAGMA page_size")
+                page_size = cursor.fetchone()[0]
+                size_before = page_count_before * page_size
+                
+                # 执行VACUUM来压缩数据库
+                cursor.execute("VACUUM")
+                
+                # 重建统计信息
+                cursor.execute("ANALYZE")
+                
+                # 获取优化后的数据库大小
+                cursor.execute("PRAGMA page_count")
+                page_count_after = cursor.fetchone()[0]
+                size_after = page_count_after * page_size
+                
+                saved_bytes = size_before - size_after
+                
+                logger.info(f"数据库优化完成：节省 {saved_bytes} 字节")
+                
+                return {
+                    "size_before": size_before,
+                    "size_after": size_after,
+                    "saved_bytes": saved_bytes,
+                    "optimization_ratio": saved_bytes / size_before if size_before > 0 else 0
+                }
+                
+        except Exception as e:
+            logger.error(f"数据库优化失败: {e}")
+            return {"error": str(e)}
 
 
 # 全局数据库实例

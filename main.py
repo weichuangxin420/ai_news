@@ -25,9 +25,10 @@ def start_scheduler_daemon():
         
         manager = SchedulerManager()
         
-        # 启用完整流程，禁用独立任务
+        # 启用增强版调度策略
         manager.start(
-            enable_full_pipeline=True,
+            enable_enhanced_strategy=True,
+            enable_full_pipeline=False,
             enable_analysis=False,
             enable_email=False
         )
@@ -54,9 +55,10 @@ def start_scheduler_background():
         
         manager = SchedulerManager()
         
-        # 启用完整流程，禁用独立任务
+        # 启用增强版调度策略
         manager.start(
-            enable_full_pipeline=True,
+            enable_enhanced_strategy=True,
+            enable_full_pipeline=False,
             enable_analysis=False,
             enable_email=False,
             daemon=True
@@ -94,44 +96,84 @@ def scheduler_status():
 def run_single_pipeline():
     """手动运行一次完整流程"""
     try:
-        from src.news_collector import NewsCollector
-        from src.ai_analyzer import AIAnalyzer
-        from src.email_sender import EmailSender
-        from src.utils.database import db_manager
+        from src.scheduler import TaskScheduler
         
-        logger.info("开始手动执行完整流程...")
+        logger.info("开始手动执行增强版完整流程...")
         
-        # 1. 新闻收集
-        logger.info("1️⃣ 执行新闻收集...")
-        collector = NewsCollector()
-        news_list = collector.collect_all_news()
-        logger.info(f"收集到 {len(news_list)} 条新闻")
+        # 使用增强版调度器的收集和分析功能
+        scheduler = TaskScheduler()
+        scheduler.initialize_components()
         
-        if not news_list:
-            logger.warning("没有收集到新新闻，流程结束")
-            return
+        # 执行收集和分析
+        news_list = scheduler.collect_and_analyze_news()
         
-        # 2. AI分析
-        logger.info("2️⃣ 执行AI分析...")
-        analyzer = AIAnalyzer()
-        analysis_results = analyzer.analyze_news_batch(news_list)
-        logger.info(f"分析了 {len(analysis_results)} 条新闻")
-        
-        # 3. 发送邮件
-        if analysis_results:
-            logger.info("3️⃣ 发送分析报告...")
-            sender = EmailSender()
-            success = sender.send_analysis_report(analysis_results)
+        if news_list:
+            logger.info(f"✅ 增强版流程执行成功，处理了 {len(news_list)} 条新闻")
+            # 显示一些统计信息
+            high_importance = len([n for n in news_list if n.importance_score >= 70])
+            medium_importance = len([n for n in news_list if 40 <= n.importance_score < 70])
+            low_importance = len([n for n in news_list if n.importance_score < 40])
             
-            if success:
-                logger.info("✅ 完整流程执行成功")
-            else:
-                logger.warning("⚠️  邮件发送失败，但分析已完成")
+            print(f"📊 重要性分布:")
+            print(f"  🔴 高重要性: {high_importance} 条")
+            print(f"  🟡 中等重要性: {medium_importance} 条")
+            print(f"  🟢 低重要性: {low_importance} 条")
         else:
-            logger.warning("没有分析结果，跳过邮件发送")
+            logger.warning("没有收集到新新闻")
             
     except Exception as e:
-        logger.error(f"执行完整流程失败: {e}")
+        logger.error(f"执行增强版流程失败: {e}")
+
+
+def run_enhanced_pipeline():
+    """运行增强版流程（带重要性分析）"""
+    try:
+        from src.scheduler import TaskScheduler
+        
+        logger.info("开始执行增强版新闻收集和分析...")
+        
+        scheduler = TaskScheduler()
+        scheduler.initialize_components()
+        
+        # 收集并分析新闻
+        news_list = scheduler.collect_and_analyze_news()
+        
+        if news_list:
+            # 按重要性排序
+            sorted_news = sorted(news_list, key=lambda x: x.importance_score, reverse=True)
+            
+            logger.info(f"✅ 处理了 {len(news_list)} 条新闻")
+            
+            # 显示前5条重要新闻
+            print("\n📰 重要新闻预览:")
+            for i, news in enumerate(sorted_news[:5], 1):
+                print(f"{i}. [{news.importance_score}分] {news.title[:50]}...")
+                
+            # 发送测试邮件
+            scheduler._send_instant_email(news_list[:5], "测试报告")
+            
+        else:
+            logger.warning("没有收集到新新闻")
+            
+    except Exception as e:
+        logger.error(f"执行增强版流程失败: {e}")
+
+
+def send_daily_summary():
+    """手动发送每日汇总"""
+    try:
+        from src.scheduler import TaskScheduler
+        
+        logger.info("开始生成每日汇总...")
+        
+        scheduler = TaskScheduler()
+        scheduler.initialize_components()
+        
+        # 执行每日汇总任务
+        scheduler._daily_summary_email()
+        
+    except Exception as e:
+        logger.error(f"发送每日汇总失败: {e}")
 
 
 def show_help():
@@ -140,10 +182,12 @@ def show_help():
 🤖 AI新闻收集与影响分析系统
 
 📋 可用命令:
-   start        - 启动调度器守护进程（前台运行）
-   background   - 后台启动调度器
+   start        - 启动增强版调度器守护进程（前台运行）
+   background   - 后台启动增强版调度器
    status       - 查看调度器状态
-   run-once     - 手动执行一次完整流程
+   run-once     - 手动执行一次完整流程（带重要性分析）
+   enhanced     - 运行增强版流程并发送测试邮件
+   summary      - 手动发送今日汇总邮件
    help         - 显示此帮助信息
 
 📁 测试功能:
@@ -180,7 +224,7 @@ def main():
     
     parser.add_argument(
         "command", 
-        choices=["start", "background", "status", "run-once", "help"],
+        choices=["start", "background", "status", "run-once", "enhanced", "summary", "help"],
         help="要执行的命令"
     )
     
@@ -194,6 +238,10 @@ def main():
         scheduler_status()
     elif args.command == "run-once":
         run_single_pipeline()
+    elif args.command == "enhanced":
+        run_enhanced_pipeline()
+    elif args.command == "summary":
+        send_daily_summary()
     elif args.command == "help":
         show_help()
 

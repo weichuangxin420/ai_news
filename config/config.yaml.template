@@ -8,42 +8,30 @@ news_collection:
   
   # 新闻源配置
   sources:
-    # RSS源 - 暂无可用的RSS源
-    rss_feeds: []
+    # RSS源 - 仅使用中国新闻网财经RSS
+    rss_feeds:
+      - name: "中国新闻网财经"
+        url: "https://www.chinanews.com.cn/rss/finance.xml"
+        enabled: true
+        max_items: 50
     
-    # API源 - 只保留测试通过的API源
-    api_sources:
-      # 东方财富API（测试通过 ✅）
-      eastmoney:
-        base_url: "https://push2.eastmoney.com/api/qt/clist/get"
-        enabled: true
-        params:
-          np: 2
-          fltt: 1
-          invt: 2
-          fields: "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f22,f28,f30,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40,f41,f42,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65,f66,f67,f68,f69,f70,f71,f72,f73,f74,f75,f76,f77,f78,f79,f80,f81,f82,f83"
-      
-      # 腾讯财经API（测试通过 ✅）
-      tencent_finance:
-        base_url: "https://qt.gtimg.cn/q="
-        enabled: true
-        description: "腾讯股票数据接口"
-      
-      # 新浪财经API（修改为可靠接口 ✅）
-      sina_finance:
-        base_url: "https://hq.sinajs.cn/list="
-        enabled: true
-        description: "新浪股票实时数据接口"
+    # 禁用所有API源
+    api_sources: {}
     
-    # 网页爬虫源 - 暂时禁用避免被封
+    # 禁用网页爬虫源
     web_scraping: []
+  
+  # 数据处理配置
+  processing:
+    enable_keyword_filtering: false  # 禁用关键词过滤
+    enable_deduplication: true       # 启用去重功能
 
 # AI分析配置
 ai_analysis:
   # DeepSeek配置
   deepseek:
     api_key: "YOUR_DEEPSEEK_API_KEY"  # 请替换为你的DeepSeek API密钥
-    model: "deepseek-chat"
+    model: "deepseek-reasoner"  # 使用思考模型
     base_url: "https://api.deepseek.com/v1"
     max_tokens: 2000
     temperature: 0.1
@@ -94,17 +82,35 @@ logging:
 
 # 调度器配置
 scheduler:
-  # 分析任务间隔（分钟）- 不使用，改用完整流程
-  analysis_interval: 60
-  
-  # 完整流程间隔（分钟）- 新闻收集+AI分析+立即发送邮件
-  pipeline_interval: 30  # 每30分钟执行完整流程
-  
-  # 邮件发送计划（cron表达式）- 不使用独立邮件任务
-  email_cron: "0 9,18 * * *"  # 备用：每天9点和18点发送
-  
-  # 邮件报告包含最近几小时的分析
-  email_recent_hours: 1  # 只包含最新的分析结果
+  # 新的调度策略
+  strategy:
+    # 早上8点收集并发送邮件
+    morning_collection:
+      enabled: true
+      hour: 8
+      minute: 0
+      send_email: true
+    
+    # 交易时间收集（8:00-16:00每3分钟）
+    trading_hours:
+      enabled: true
+      start_hour: 8
+      end_hour: 16
+      interval_minutes: 3
+      send_email: false
+    
+    # 晚上10点收集
+    evening_collection:
+      enabled: true
+      hour: 22
+      minute: 0
+      send_email: false
+    
+    # 每日汇总邮件（23:30）
+    daily_summary:
+      enabled: true
+      hour: 23
+      minute: 30
   
   # 错误重试配置
   retry:
@@ -116,6 +122,11 @@ scheduler:
     news_collection: 600    # 10分钟
     ai_analysis: 1800      # 30分钟
     email_sending: 300     # 5分钟
+  
+  # 并发处理配置
+  concurrent_requests: 10    # 最大并发请求数
+  batch_size: 20            # 批处理大小
+  rate_limit: 100           # 每分钟请求限制
 
 # 系统配置
 system:

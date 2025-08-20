@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 
 from .utils.logger import get_logger
-from .ai_analyzer import AnalysisResult
+from .ai.ai_analyzer import AnalysisResult
 
 logger = get_logger('email_sender')
 

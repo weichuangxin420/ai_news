@@ -21,6 +21,9 @@ from test_news_collection import run_news_collection_tests
 from test_ai_analysis import run_ai_analysis_tests
 from test_database import run_database_tests
 
+# 并发分析功能已集成到主AI分析器中，无需单独测试模块
+CONCURRENT_AVAILABLE = False
+
 
 class TestRunner:
     """测试运行器"""
@@ -119,6 +122,8 @@ class TestRunner:
             }
             return {}
     
+
+    
     def run_all_tests(self) -> Dict[str, dict]:
         """运行所有测试"""
         print("🚀 AI新闻系统 - 完整测试套件")
@@ -126,7 +131,7 @@ class TestRunner:
         
         self.start_time = time.time()
         
-        # 1. API测试
+        # 1. API数据源测试
         self.run_api_tests()
         
         # 2. 数据库测试
@@ -135,7 +140,7 @@ class TestRunner:
         # 3. 新闻收集测试
         self.run_news_collection_tests()
         
-        # 4. AI分析测试
+        # 4. AI分析测试（包含并发功能测试）
         self.run_ai_analysis_tests()
         
         self.end_time = time.time()
@@ -156,6 +161,8 @@ class TestRunner:
             "analysis": self.run_ai_analysis_tests,
             "database": self.run_database_tests
         }
+        
+
         
         if test_name not in test_map:
             print(f"❌ 未知的测试模块: {test_name}")
@@ -267,11 +274,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 测试模块说明:
-  api       - 测试API数据源连接和数据获取
-  collection - 测试新闻收集功能
-  analysis  - 测试AI分析功能  
-  database  - 测试数据库操作
-  all       - 运行所有测试（默认）
+  api         - 测试API数据源连接和数据获取
+  collection  - 测试新闻收集功能
+  analysis    - 测试AI分析功能
+
+  database    - 测试数据库操作
+  all         - 运行所有测试（默认）
 
 使用示例:
   python main_test.py                    # 运行所有测试

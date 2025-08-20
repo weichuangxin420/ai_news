@@ -16,8 +16,9 @@ import yaml
 import signal
 import sys
 
-from .news_collector import NewsCollector
-from .ai_analyzer import AIAnalyzer
+from .collectors.news_collector import NewsCollector
+from .ai.ai_analyzer import AIAnalyzer, create_enhanced_analyzer, BatchAnalysisConfig
+from .ai.importance_analyzer import ImportanceAnalyzer
 from .email_sender import EmailSender
 from .utils.logger import get_logger
 from .utils.database import db_manager
@@ -53,6 +54,8 @@ class TaskScheduler:
         # 组件实例
         self.news_collector = None
         self.ai_analyzer = None
+        self.enhanced_ai_analyzer = None
+        self.importance_analyzer = None
         self.email_sender = None
         
         # 设置事件监听器
@@ -127,6 +130,16 @@ class TaskScheduler:
             
             self.news_collector = NewsCollector()
             self.ai_analyzer = AIAnalyzer()
+            
+            # 初始化增强版AI分析器（支持并发）
+            self.enhanced_ai_analyzer = create_enhanced_analyzer(
+                max_concurrent=self.config.get('scheduler', {}).get('concurrent_requests', 10),
+                use_async=True,
+                timeout_seconds=30,
+                rate_limit=self.config.get('scheduler', {}).get('rate_limit', 100)
+            )
+            
+            self.importance_analyzer = ImportanceAnalyzer()
             self.email_sender = EmailSender()
             
             logger.info("组件初始化完成")
@@ -226,6 +239,75 @@ class TaskScheduler:
         self.jobs['full_pipeline'] = job
         logger.info(f"完整流程任务已添加，执行间隔: {interval_minutes} 分钟")
     
+    def add_enhanced_strategy_jobs(self):
+        """添加增强版调度策略任务"""
+        strategy_config = self.config.get('scheduler', {}).get('strategy', {})
+        
+        # 1. 早上8点收集并发送邮件
+        morning_config = strategy_config.get('morning_collection', {})
+        if morning_config.get('enabled', True):
+            job = self.scheduler.add_job(
+                func=self._morning_collection_with_email,
+                trigger=CronTrigger(
+                    hour=morning_config.get('hour', 8), 
+                    minute=morning_config.get('minute', 0)
+                ),
+                id='morning_collection',
+                name='早上8点收集并发送邮件',
+                max_instances=1,
+                coalesce=True
+            )
+            self.jobs['morning_collection'] = job
+            logger.info("早上8点收集任务已添加")
+        
+        # 2. 交易时间每3分钟收集
+        trading_config = strategy_config.get('trading_hours', {})
+        if trading_config.get('enabled', True):
+            job = self.scheduler.add_job(
+                func=self._trading_hours_collection,
+                trigger=IntervalTrigger(minutes=trading_config.get('interval_minutes', 3)),
+                id='trading_hours_collection',
+                name='交易时间收集',
+                max_instances=1,
+                coalesce=True
+            )
+            self.jobs['trading_hours_collection'] = job
+            logger.info(f"交易时间收集任务已添加，间隔: {trading_config.get('interval_minutes', 3)}分钟")
+        
+        # 3. 晚上10点收集
+        evening_config = strategy_config.get('evening_collection', {})
+        if evening_config.get('enabled', True):
+            job = self.scheduler.add_job(
+                func=self._evening_collection_no_email,
+                trigger=CronTrigger(
+                    hour=evening_config.get('hour', 22), 
+                    minute=evening_config.get('minute', 0)
+                ),
+                id='evening_collection',
+                name='晚上10点收集',
+                max_instances=1,
+                coalesce=True
+            )
+            self.jobs['evening_collection'] = job
+            logger.info("晚上10点收集任务已添加")
+        
+        # 4. 每日汇总邮件
+        summary_config = strategy_config.get('daily_summary', {})
+        if summary_config.get('enabled', True):
+            job = self.scheduler.add_job(
+                func=self._daily_summary_email,
+                trigger=CronTrigger(
+                    hour=summary_config.get('hour', 23), 
+                    minute=summary_config.get('minute', 30)
+                ),
+                id='daily_summary',
+                name='每日汇总邮件',
+                max_instances=1,
+                coalesce=True
+            )
+            self.jobs['daily_summary'] = job
+            logger.info("每日汇总邮件任务已添加")
+
     def add_maintenance_job(self):
         """添加维护任务（数据清理等）"""
         # 每天凌晨3点执行维护任务
@@ -263,30 +345,49 @@ class TaskScheduler:
             raise
     
     def _analysis_task(self):
-        """AI分析任务"""
-        logger.info("=== 开始执行AI分析任务 ===")
+        """AI分析任务（使用增强版并发分析）"""
+        logger.info("=== 开始执行AI分析任务（并发模式）===")
         
         try:
-            if not self.ai_analyzer:
-                self.ai_analyzer = AIAnalyzer()
+            if not self.enhanced_ai_analyzer:
+                self.enhanced_ai_analyzer = create_enhanced_analyzer(
+                    max_concurrent=self.config.get('scheduler', {}).get('concurrent_requests', 10),
+                    use_async=True,
+                    timeout_seconds=30,
+                    rate_limit=100
+                )
             
             # 获取未分析的新闻
-            news_list = db_manager.get_news_items(limit=20)
+            news_list = db_manager.get_news_items(limit=50)  # 增加批量大小
             if not news_list:
                 logger.info("没有待分析的新闻")
                 return 0
             
             start_time = time.time()
-            results = self.ai_analyzer.batch_analyze(news_list)
+            # 使用增强版分析器进行并发分析
+            results = self.enhanced_ai_analyzer.enhanced_batch_analyze(news_list)
             end_time = time.time()
             
             duration = end_time - start_time
-            logger.info(f"AI分析完成: {len(results)} 条新闻，耗时: {duration:.2f} 秒")
+            avg_time = duration / len(results) if results else 0
+            logger.info(f"AI并发分析完成: {len(results)} 条新闻，总耗时: {duration:.2f} 秒，平均: {avg_time:.2f} 秒/条")
             
             return len(results)
             
         except Exception as e:
             logger.error(f"AI分析任务失败: {e}")
+            # 降级到标准分析器
+            try:
+                logger.info("尝试使用标准分析器")
+                if not self.ai_analyzer:
+                    self.ai_analyzer = AIAnalyzer()
+                news_list = db_manager.get_news_items(limit=20)
+                if news_list:
+                    results = self.ai_analyzer.batch_analyze(news_list)
+                    logger.info(f"标准分析器完成: {len(results)} 条新闻")
+                    return len(results)
+            except Exception as fallback_e:
+                logger.error(f"标准分析器也失败: {fallback_e}")
             raise
     
     def _email_task(self):
@@ -310,8 +411,16 @@ class TaskScheduler:
                 logger.info("没有新闻数据，跳过邮件发送")
                 return False
             
-            # 快速分析（如果没有缓存的分析结果）
-            results = self.ai_analyzer.batch_analyze(news_list[:5])
+            # 快速分析（如果没有缓存的分析结果） - 使用并发分析
+            if not self.enhanced_ai_analyzer:
+                self.enhanced_ai_analyzer = create_enhanced_analyzer(
+                    max_concurrent=5,
+                    use_async=True,
+                    timeout_seconds=300,
+                    rate_limit=50
+                )
+            
+            results = self.enhanced_ai_analyzer.enhanced_batch_analyze(news_list[:5])
             
             # 发送邮件
             success = self.email_sender.send_analysis_report(results)
@@ -355,6 +464,154 @@ class TaskScheduler:
             logger.error(f"完整流程任务失败: {e}")
             raise
     
+    def collect_and_analyze_news(self, save_to_db: bool = True) -> List:
+        """
+        收集新闻并分析重要性
+        
+        Args:
+            save_to_db: 是否保存到数据库
+            
+        Returns:
+            分析后的新闻列表
+        """
+        try:
+            # 1. 收集新闻
+            logger.info("开始收集新闻...")
+            if not self.news_collector:
+                self.news_collector = NewsCollector()
+            
+            news_list = self.news_collector.collect_all_news()
+            
+            if not news_list:
+                logger.info("没有收集到新的新闻")
+                return []
+            
+            logger.info(f"收集到 {len(news_list)} 条新闻")
+            
+            # 2. 分析重要性（ImportanceAnalyzer）
+            logger.info("开始分析新闻重要性...")
+            if not self.importance_analyzer:
+                self.importance_analyzer = ImportanceAnalyzer()
+            importance_results = self.importance_analyzer.batch_analyze_importance(news_list)
+            for news_item, result in zip(news_list, importance_results):
+                news_item.importance_score = result.importance_score
+                news_item.importance_reasoning = result.reasoning
+                news_item.importance_factors = result.key_factors
+
+            # 3. 并发AI分析（EnhancedAIAnalyzer）以获取影响程度（impact_level）
+            logger.info("开始AI影响分析（并发）...")
+            if not self.enhanced_ai_analyzer:
+                self.enhanced_ai_analyzer = create_enhanced_analyzer(
+                    max_concurrent=self.config.get('scheduler', {}).get('concurrent_requests', 10),
+                    use_async=True,
+                    timeout_seconds=30,
+                    rate_limit=self.config.get('scheduler', {}).get('rate_limit', 100)
+                )
+            ai_results = self.enhanced_ai_analyzer.enhanced_batch_analyze(news_list)
+
+            # 4. 将AI分析的影响级别映射到NewsItem.impact_degree
+            try:
+                from .ai.ai_analyzer import AnalysisResult as _AR
+                # ai_results 与 news_list 一一对应
+                for news_item, ar in zip(news_list, ai_results):
+                    if hasattr(ar, 'impact_level'):
+                        news_item.impact_degree = ar.impact_level
+            except Exception as _e:
+                logger.warning(f"映射影响程度失败: {_e}")
+
+            # 5. 保存到数据库（包含重要性与影响程度）
+            if save_to_db:
+                saved_count = db_manager.save_news_items_batch(news_list)
+                logger.info(f"保存 {saved_count} 条新闻（含重要性与影响程度）到数据库")
+            
+            return news_list
+            
+        except Exception as e:
+            logger.error(f"收集和分析新闻失败: {e}")
+            return []
+    
+    def _morning_collection_with_email(self):
+        """早上8点：收集、分析并发送邮件"""
+        try:
+            logger.info("=== 执行早上8点收集任务 ===")
+            
+            # 收集和分析新闻
+            news_list = self.collect_and_analyze_news()
+            
+            if news_list:
+                # 发送邮件
+                self._send_instant_email(news_list, "早间新闻报告")
+                logger.info(f"早间新闻报告发送完成，包含 {len(news_list)} 条新闻")
+                
+        except Exception as e:
+            logger.error(f"早上8点任务执行失败: {e}")
+            raise
+    
+    def _trading_hours_collection(self):
+        """交易时间收集（8:00-16:00）"""
+        try:
+            from datetime import time
+            current_time = datetime.now().time()
+            
+            # 只在交易时间执行
+            if time(8, 0) <= current_time <= time(16, 0):
+                logger.info("=== 执行交易时间收集任务 ===")
+                
+                # 收集和分析新闻，但不发送邮件
+                news_list = self.collect_and_analyze_news()
+                
+                if news_list:
+                    logger.info(f"交易时间收集到 {len(news_list)} 条新闻")
+            else:
+                logger.debug("当前不在交易时间，跳过收集")
+                
+        except Exception as e:
+            logger.error(f"交易时间收集任务失败: {e}")
+            raise
+    
+    def _evening_collection_no_email(self):
+        """晚上10点：收集但不发送邮件"""
+        try:
+            logger.info("=== 执行晚上10点收集任务 ===")
+            
+            # 收集和分析新闻
+            news_list = self.collect_and_analyze_news()
+            
+            if news_list:
+                logger.info(f"晚上10点收集到 {len(news_list)} 条新闻，已保存但不发送邮件")
+                
+        except Exception as e:
+            logger.error(f"晚上10点任务执行失败: {e}")
+            raise
+    
+    def _daily_summary_email(self):
+        """每日汇总邮件（晚上11:30）"""
+        try:
+            logger.info("=== 生成每日汇总邮件 ===")
+            
+            # 获取今天的所有新闻
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_news = db_manager.get_news_items_by_date_range(today_start, datetime.now())
+            
+            if not today_news:
+                logger.info("今天没有新闻，跳过汇总邮件")
+                return
+            
+            # 按重要性排序
+            sorted_news = sorted(today_news, key=lambda x: x.importance_score, reverse=True)
+            
+            # 生成汇总报告
+            report = self._generate_daily_summary_report(sorted_news)
+            
+            # 发送邮件
+            self._send_summary_email(report)
+            
+            logger.info(f"每日汇总邮件发送成功，包含 {len(sorted_news)} 条新闻")
+            
+        except Exception as e:
+            logger.error(f"每日汇总邮件发送失败: {e}")
+            raise
+
     def _maintenance_task(self):
         """维护任务"""
         logger.info("=== 开始执行维护任务 ===")
@@ -403,6 +660,243 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"日志文件清理失败: {e}")
     
+    def _send_instant_email(self, news_list, title_prefix: str = ""):
+        """发送即时新闻邮件"""
+        try:
+            if not self.email_sender:
+                self.email_sender = EmailSender()
+            
+            # 按重要性排序
+            sorted_news = sorted(news_list, key=lambda x: x.importance_score, reverse=True)
+            
+            # 生成报告
+            report = self._generate_instant_report(sorted_news)
+            
+            # 获取配置的收件人
+            recipients = self.config.get('email', {}).get('recipients', [])
+            
+            # 发送邮件
+            subject = f"📰 {title_prefix} - {datetime.now().strftime('%H:%M')}"
+            self.email_sender.send_simple_email(
+                recipients=recipients,
+                subject=subject,
+                content=report,
+                is_html=True
+            )
+            
+            logger.info(f"即时邮件发送成功: {title_prefix}")
+            
+        except Exception as e:
+            logger.error(f"发送即时邮件失败: {e}")
+    
+    def _send_summary_email(self, report: str):
+        """发送汇总邮件"""
+        try:
+            if not self.email_sender:
+                self.email_sender = EmailSender()
+            
+            # 获取配置的收件人
+            recipients = self.config.get('email', {}).get('recipients', [])
+            
+            # 发送邮件
+            subject = f"📊 每日新闻汇总 - {datetime.now().strftime('%Y年%m月%d日')}"
+            self.email_sender.send_simple_email(
+                recipients=recipients,
+                subject=subject,
+                content=report,
+                is_html=True
+            )
+            
+            logger.info("每日汇总邮件发送成功")
+            
+        except Exception as e:
+            logger.error(f"发送汇总邮件失败: {e}")
+    
+    def _generate_instant_report(self, news_list) -> str:
+        """生成即时新闻报告（HTML格式）"""
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; }}
+                .news-item {{ margin: 20px 0; padding: 15px; border-left: 4px solid #667eea; background: #f8f9fa; }}
+                .importance-high {{ border-left-color: #e74c3c; }}
+                .importance-medium {{ border-left-color: #f39c12; }}
+                .importance-low {{ border-left-color: #27ae60; }}
+                .score {{ display: inline-block; padding: 3px 8px; border-radius: 3px; font-weight: bold; }}
+                .score-high {{ background: #e74c3c; color: white; }}
+                .score-medium {{ background: #f39c12; color: white; }}
+                .score-low {{ background: #27ae60; color: white; }}
+                .summary {{ margin: 10px 0; color: #555; }}
+                .factors {{ font-size: 0.9em; color: #777; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>📰 即时新闻报告</h1>
+                <p>时间: {datetime.now().strftime('%Y年%m月%d日 %H:%M')}</p>
+                <p>新闻数量: {len(news_list)} 条</p>
+            </div>
+        """
+        
+        for news in news_list[:10]:  # 最多显示10条
+            # 确定重要性等级
+            if news.importance_score >= 70:
+                importance_class = "importance-high"
+                score_class = "score-high"
+                importance_emoji = "🔴"
+            elif news.importance_score >= 40:
+                importance_class = "importance-medium"
+                score_class = "score-medium"
+                importance_emoji = "🟡"
+            else:
+                importance_class = "importance-low"
+                score_class = "score-low"
+                importance_emoji = "🟢"
+            
+            html += f"""
+            <div class="news-item {importance_class}">
+                <h3>{importance_emoji} {news.title}</h3>
+                <p>
+                    <span class="score {score_class}">重要性: {news.importance_score}分</span>
+                    <span style="margin-left: 10px;">来源: {news.source}</span>
+                </p>
+                <div class="summary">
+                    <strong>摘要:</strong> {news.content[:200]}...
+                </div>
+                <div class="factors">
+                    <strong>关键因素:</strong> {news.importance_factors if hasattr(news, 'importance_factors') and news.importance_factors else '暂无'}
+                </div>
+            </div>
+            """
+        
+        html += """
+        </body>
+        </html>
+        """
+        
+        return html
+    
+    def _generate_daily_summary_report(self, news_list) -> str:
+        """生成每日汇总报告（HTML格式）"""
+        
+        # 统计信息
+        total_count = len(news_list)
+        high_importance = len([n for n in news_list if n.importance_score >= 70])
+        medium_importance = len([n for n in news_list if 40 <= n.importance_score < 70])
+        low_importance = len([n for n in news_list if n.importance_score < 40])
+        avg_score = sum(n.importance_score for n in news_list) / total_count if total_count > 0 else 0
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{ font-family: 'Microsoft YaHei', Arial, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }}
+                .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 20px; }}
+                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; text-align: center; }}
+                .stats {{ display: flex; justify-content: space-around; margin: 30px 0; }}
+                .stat-card {{ text-align: center; padding: 20px; background: #f8f9fa; border-radius: 8px; flex: 1; margin: 0 10px; }}
+                .stat-number {{ font-size: 2em; font-weight: bold; color: #667eea; }}
+                .news-section {{ margin: 30px 0; }}
+                .section-title {{ font-size: 1.5em; color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px; margin-bottom: 20px; }}
+                .news-item {{ margin: 15px 0; padding: 15px; border-radius: 8px; background: #f8f9fa; }}
+                .news-title {{ font-weight: bold; color: #333; margin-bottom: 5px; }}
+                .importance {{ display: inline-block; padding: 3px 10px; border-radius: 15px; font-size: 0.9em; font-weight: bold; }}
+                .importance-high {{ background: #e74c3c; color: white; }}
+                .importance-medium {{ background: #f39c12; color: white; }}
+                .importance-low {{ background: #27ae60; color: white; }}
+                .summary {{ color: #666; margin: 10px 0; }}
+                .footer {{ text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #999; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>📊 每日新闻汇总报告</h1>
+                    <p style="font-size: 1.2em;">{datetime.now().strftime('%Y年%m月%d日')}</p>
+                </div>
+                
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-number">{total_count}</div>
+                        <div>总新闻数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">{avg_score:.1f}</div>
+                        <div>平均重要性</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">{high_importance}</div>
+                        <div>高重要性新闻</div>
+                    </div>
+                </div>
+        """
+        
+        # 高重要性新闻
+        high_news = [n for n in news_list if n.importance_score >= 70]
+        if high_news:
+            html += """
+                <div class="news-section">
+                    <h2 class="section-title">🔴 高重要性新闻</h2>
+            """
+            for news in high_news[:10]:
+                html += f"""
+                    <div class="news-item">
+                        <div class="news-title">
+                            {news.title}
+                            <span class="importance importance-high">{news.importance_score}分</span>
+                        </div>
+                        <div class="summary">{news.content[:150]}...</div>
+                    </div>
+                """
+            html += "</div>"
+        
+        # 中等重要性新闻
+        medium_news = [n for n in news_list if 40 <= n.importance_score < 70]
+        if medium_news:
+            html += """
+                <div class="news-section">
+                    <h2 class="section-title">🟡 中等重要性新闻</h2>
+            """
+            for news in medium_news[:10]:
+                html += f"""
+                    <div class="news-item">
+                        <div class="news-title">
+                            {news.title}
+                            <span class="importance importance-medium">{news.importance_score}分</span>
+                        </div>
+                        <div class="summary">{news.content[:150]}...</div>
+                    </div>
+                """
+            html += "</div>"
+        
+        # 低重要性新闻摘要
+        if low_importance > 0:
+            html += f"""
+                <div class="news-section">
+                    <h2 class="section-title">🟢 其他新闻</h2>
+                    <p>今日还有 {low_importance} 条低重要性新闻，主要涉及日常市场动态和公司公告。</p>
+                </div>
+            """
+        
+        html += f"""
+                <div class="footer">
+                    <p>本报告由AI新闻分析系统自动生成</p>
+                    <p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return html
+
     def _health_check(self):
         """系统健康检查"""
         try:
@@ -410,6 +904,8 @@ class TaskScheduler:
             components_status = {
                 'news_collector': self.news_collector is not None,
                 'ai_analyzer': self.ai_analyzer is not None,
+                'enhanced_ai_analyzer': self.enhanced_ai_analyzer is not None,
+                'importance_analyzer': self.importance_analyzer is not None,
                 'email_sender': self.email_sender is not None,
                 'database': True,  # 基本检查
                 'scheduler': self.is_running
@@ -435,6 +931,7 @@ class TaskScheduler:
              enable_analysis: bool = True,
              enable_email: bool = True,
              enable_full_pipeline: bool = False,
+             enable_enhanced_strategy: bool = False,
              enable_maintenance: bool = True):
         """
         启动调度器
@@ -444,6 +941,7 @@ class TaskScheduler:
             enable_analysis: 是否启用分析任务
             enable_email: 是否启用邮件任务
             enable_full_pipeline: 是否启用完整流程任务
+            enable_enhanced_strategy: 是否启用增强版调度策略
             enable_maintenance: 是否启用维护任务
         """
         try:
@@ -455,7 +953,10 @@ class TaskScheduler:
                 return False
             
             # 添加任务
-            if enable_full_pipeline:
+            if enable_enhanced_strategy:
+                # 使用增强版调度策略
+                self.add_enhanced_strategy_jobs()
+            elif enable_full_pipeline:
                 self.add_full_pipeline_job()
             else:
                 if enable_news_collection:

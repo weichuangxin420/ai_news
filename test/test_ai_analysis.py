@@ -13,7 +13,7 @@ from typing import Dict, List
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ai_analyzer import AIAnalyzer
+from src.ai.ai_analyzer import AIAnalyzer
 from src.utils.database import NewsItem, db_manager
 from src.utils.logger import get_logger
 
@@ -79,22 +79,18 @@ class AIAnalysisTester:
             
             print(f"✅ 单条新闻分析完成")
             print(f"   分析时间: {analysis_time:.2f}秒")
-            print(f"   影响板块: {', '.join(result.affected_sectors[:3])}")
-            print(f"   影响评分: {result.impact_score}/10")
-            print(f"   情感倾向: {result.sentiment}")
-            print(f"   分析模式: {'模拟' if self.mock_mode else '真实'}")
+            print(f"   影响评分: {result.impact_score}/100")
+            print(f"   分析摘要: {result.summary[:50]}...")
+            print(f"   分析模式: {'真实' if not self.mock_mode else '模拟'}")
             
-            test_result = {
+            self.results["single_analysis"] = {
                 "status": "success",
                 "analysis_time": analysis_time,
-                "affected_sectors": result.affected_sectors,
                 "impact_score": result.impact_score,
-                "sentiment": result.sentiment,
-                "mock_mode": self.mock_mode
+                "summary": result.summary,
+                "mode": "real" if not self.mock_mode else "mock"
             }
-            
-            self.results["single_analysis"] = test_result
-            return test_result
+            return self.results["single_analysis"]
             
         except Exception as e:
             print(f"❌ 单条新闻分析失败: {e}")
@@ -122,7 +118,7 @@ class AIAnalysisTester:
             print(f"🔍 开始批量分析 {len(test_news_list)} 条新闻...")
             
             start_time = time.time()
-            results = self.analyzer.analyze_news_batch(test_news_list)
+            results = self.analyzer.batch_analyze(test_news_list)
             end_time = time.time()
             
             analysis_time = end_time - start_time
@@ -136,10 +132,11 @@ class AIAnalysisTester:
             # 显示分析结果示例
             if results:
                 print(f"\n📋 分析结果示例:")
-                for i, result in enumerate(results[:2]):
-                    print(f"   {i+1}. 影响板块: {', '.join(result.affected_sectors[:3])}")
-                    print(f"      影响评分: {result.impact_score}/10")
-                    print(f"      情感倾向: {result.sentiment}")
+                for i, result in enumerate(results[:3], 1):
+                    print(f"   {i}. 影响评分: {result.impact_score}/100")
+                    print(f"      摘要: {result.summary[:50]}...")
+                    if i < 3:
+                        print()
             
             test_result = {
                 "status": "success",
@@ -149,9 +146,8 @@ class AIAnalysisTester:
                 "mock_mode": self.mock_mode,
                 "sample_results": [
                     {
-                        "affected_sectors": result.affected_sectors[:3],
                         "impact_score": result.impact_score,
-                        "sentiment": result.sentiment
+                        "summary": result.summary[:50]
                     } for result in results[:2]
                 ]
             }
@@ -165,67 +161,81 @@ class AIAnalysisTester:
             self.results["batch_analysis"] = result
             return result
 
-    def test_analysis_quality(self) -> Dict[str, any]:
+    def test_analysis_quality(self) -> Dict:
         """测试分析质量"""
-        print("\n🎯 测试分析质量")
-        print("-" * 60)
+        print("🎯 测试分析质量")
+        print("------------------------------------------------------------")
         
         try:
-            # 创建具有明确特征的测试新闻
-            quality_test_news = [
-                NewsItem(
-                    title="银行股大涨，建设银行涨停，工商银行涨8%",
-                    content="今日银行板块表现强劲，建设银行涨停，工商银行涨8%，银行股成为市场焦点。",
-                    source="测试源",
-                    category="金融",
-                    publish_time=datetime.now()
-                ),
-                NewsItem(
-                    title="科技股暴跌，腾讯跌5%，阿里巴巴跌7%",
-                    content="科技股今日集体下跌，腾讯控股跌5%，阿里巴巴跌7%，投资者担忧监管政策。",
-                    source="测试源",
-                    category="科技",
-                    publish_time=datetime.now()
-                )
+            print("🔍 测试分析质量...")
+            
+            # 定义测试用例
+            test_cases = [
+                {
+                    "news": NewsItem(
+                        id="quality_test_1",
+                        title="银行股大涨，建设银行涨停，工商银行涨8%",
+                        content="今日银行板块大幅上涨，建设银行强势涨停，工商银行涨幅达8%，银行业绩超预期。",
+                        source="测试",
+                        category="银行",
+                        keywords=["银行", "大涨", "涨停"]
+                    ),
+                    "expected_range": (60, 100)  # 预期高影响评分
+                },
+                {
+                    "news": NewsItem(
+                        id="quality_test_2", 
+                        title="科技股暴跌，腾讯跌5%，阿里巴巴跌7%",
+                        content="科技股今日遭遇重挫，腾讯控股跌5%，阿里巴巴跌7%，投资者担忧监管政策。",
+                        source="测试",
+                        category="科技", 
+                        keywords=["科技", "暴跌", "下跌"]
+                    ),
+                    "expected_range": (0, 40)  # 预期低影响评分
+                }
             ]
             
-            print(f"🔍 分析质量测试新闻...")
+            score_correct = 0
+            total_tests = len(test_cases)
             
-            results = []
-            for news in quality_test_news:
+            for test_case in test_cases:
+                news = test_case["news"]
+                expected_min, expected_max = test_case["expected_range"]
+                
                 result = self.analyzer.analyze_single_news(news)
-                results.append(result)
                 
                 print(f"   新闻: {news.title[:30]}...")
-                print(f"   预期板块: {'银行' if '银行' in news.title else '科技'}")
-                print(f"   分析板块: {', '.join(result.affected_sectors[:3])}")
-                print(f"   预期情感: {'积极' if '大涨' in news.title else '消极'}")
-                print(f"   分析情感: {result.sentiment}")
+                print(f"   预期评分范围: {expected_min}-{expected_max}")
+                print(f"   实际评分: {result.impact_score}")
                 print()
+                
+                # 检查评分是否在合理范围内
+                if expected_min <= result.impact_score <= expected_max:
+                    score_correct += 1
             
-            # 评估分析质量
-            quality_score = self._evaluate_analysis_quality(quality_test_news, results)
+            score_accuracy = score_correct / total_tests * 100
+            overall_quality = score_accuracy
             
             print(f"📊 分析质量评估:")
-            print(f"   板块识别准确性: {quality_score['sector_accuracy']:.1f}%")
-            print(f"   情感识别准确性: {quality_score['sentiment_accuracy']:.1f}%")
-            print(f"   综合质量评分: {quality_score['overall_score']:.1f}%")
+            print(f"   评分准确性: {score_accuracy:.1f}%")
+            print(f"   综合质量评分: {overall_quality:.1f}%")
             
-            test_result = {
+            self.results["analysis_quality"] = {
                 "status": "success",
-                "quality_score": quality_score,
-                "test_cases": len(quality_test_news),
-                "mock_mode": self.mock_mode
+                "score_accuracy": score_accuracy,
+                "overall_quality": overall_quality,
+                "total_tests": total_tests
             }
             
-            self.results["analysis_quality"] = test_result
-            return test_result
+            return self.results["analysis_quality"]
             
         except Exception as e:
             print(f"❌ 分析质量测试失败: {e}")
-            result = {"status": "failed", "error": str(e)}
-            self.results["analysis_quality"] = result
-            return result
+            self.results["analysis_quality"] = {
+                "status": "error",
+                "error": str(e)
+            }
+            return self.results["analysis_quality"]
 
     def _get_test_news_for_analysis(self, limit: int) -> List[NewsItem]:
         """获取用于分析的测试新闻"""
@@ -280,37 +290,6 @@ class AIAnalysisTester:
             test_news.append(news)
             
         return test_news
-
-    def _evaluate_analysis_quality(self, test_news: List[NewsItem], results: List) -> Dict[str, float]:
-        """评估分析质量"""
-        sector_correct = 0
-        sentiment_correct = 0
-        total = len(test_news)
-        
-        for i, (news, result) in enumerate(zip(test_news, results)):
-            # 检查板块识别
-            if "银行" in news.title and "银行" in result.affected_sectors:
-                sector_correct += 1
-            elif "科技" in news.title and any(s in result.affected_sectors for s in ["科技", "互联网", "软件"]):
-                sector_correct += 1
-                
-            # 检查情感识别
-            if "大涨" in news.title or "上涨" in news.title:
-                if result.sentiment in ["积极", "正面", "乐观"]:
-                    sentiment_correct += 1
-            elif "暴跌" in news.title or "下跌" in news.title:
-                if result.sentiment in ["消极", "负面", "悲观"]:
-                    sentiment_correct += 1
-        
-        sector_accuracy = (sector_correct / total) * 100 if total > 0 else 0
-        sentiment_accuracy = (sentiment_correct / total) * 100 if total > 0 else 0
-        overall_score = (sector_accuracy + sentiment_accuracy) / 2
-        
-        return {
-            "sector_accuracy": sector_accuracy,
-            "sentiment_accuracy": sentiment_accuracy,
-            "overall_score": overall_score
-        }
 
     def run_all_tests(self) -> Dict[str, dict]:
         """运行所有测试"""

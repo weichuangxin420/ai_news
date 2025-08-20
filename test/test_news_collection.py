@@ -13,7 +13,7 @@ from typing import Dict, List
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.news_collector import NewsCollector
+from src.collectors.news_collector import NewsCollector
 from src.utils.database import NewsItem, db_manager
 from src.utils.logger import get_logger
 
