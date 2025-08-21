@@ -21,7 +21,7 @@ from pathlib import Path
 import pickle
 
 from .collectors.news_collector import NewsCollector
-from .ai.ai_analyzer import AIAnalyzer, create_enhanced_analyzer, BatchAnalysisConfig
+from .ai.ai_analyzer import AIAnalyzer
 from .ai.importance_analyzer import ImportanceAnalyzer
 from .email_sender import EmailSender
 from .utils.logger import get_logger
@@ -81,7 +81,7 @@ class TaskScheduler:
         # 组件实例
         self.news_collector = None
         self.ai_analyzer = None
-        self.enhanced_ai_analyzer = None
+
         self.importance_analyzer = None
         self.email_sender = None
         
@@ -527,13 +527,7 @@ class TaskScheduler:
             self.news_collector = NewsCollector()
             self.ai_analyzer = AIAnalyzer()
             
-            # 初始化增强版AI分析器（支持并发）
-            self.enhanced_ai_analyzer = create_enhanced_analyzer(
-                max_concurrent=self.config.get('scheduler', {}).get('concurrent_requests', 10),
-                use_async=True,
-                timeout_seconds=30,
-                rate_limit=self.config.get('scheduler', {}).get('rate_limit', 100)
-            )
+
             
             self.importance_analyzer = ImportanceAnalyzer()
             self.email_sender = EmailSender()
@@ -745,45 +739,37 @@ class TaskScheduler:
         logger.info("=== 开始执行AI分析任务（并发模式）===")
         
         try:
-            if not self.enhanced_ai_analyzer:
-                self.enhanced_ai_analyzer = create_enhanced_analyzer(
-                    max_concurrent=self.config.get('scheduler', {}).get('concurrent_requests', 10),
-                    use_async=True,
-                    timeout_seconds=30,
-                    rate_limit=100
-                )
+            if not self.ai_analyzer:
+                self.ai_analyzer = AIAnalyzer()
             
             # 获取未分析的新闻
-            news_list = db_manager.get_news_items(limit=50)  # 增加批量大小
+            news_list = db_manager.get_news_items(limit=20)  # 减少批量大小
             if not news_list:
                 logger.info("没有待分析的新闻")
                 return 0
             
             start_time = time.time()
-            # 使用增强版分析器进行并发分析
-            results = self.enhanced_ai_analyzer.enhanced_batch_analyze(news_list)
-            end_time = time.time()
+            # 使用单条分析逐个处理
+            results = []
+            for news_item in news_list:
+                try:
+                    result = self.ai_analyzer.analyze_news(news_item)
+                    results.append(result)
+                    # 保存分析结果到数据库
+                    self.ai_analyzer._save_analysis_result(result)
+                except Exception as e:
+                    logger.error(f"分析单条新闻失败: {e}")
+                    continue
             
+            end_time = time.time()
             duration = end_time - start_time
             avg_time = duration / len(results) if results else 0
-            logger.info(f"AI并发分析完成: {len(results)} 条新闻，总耗时: {duration:.2f} 秒，平均: {avg_time:.2f} 秒/条")
+            logger.info(f"AI分析完成: {len(results)} 条新闻，总耗时: {duration:.2f} 秒，平均: {avg_time:.2f} 秒/条")
             
             return len(results)
             
         except Exception as e:
             logger.error(f"AI分析任务失败: {e}")
-            # 降级到标准分析器
-            try:
-                logger.info("尝试使用标准分析器")
-                if not self.ai_analyzer:
-                    self.ai_analyzer = AIAnalyzer()
-                news_list = db_manager.get_news_items(limit=20)
-                if news_list:
-                    results = self.ai_analyzer.batch_analyze(news_list)
-                    logger.info(f"标准分析器完成: {len(results)} 条新闻")
-                    return len(results)
-            except Exception as fallback_e:
-                logger.error(f"标准分析器也失败: {fallback_e}")
             raise
     
     def _email_task(self):
@@ -807,16 +793,19 @@ class TaskScheduler:
                 logger.info("没有新闻数据，跳过邮件发送")
                 return False
             
-            # 快速分析（如果没有缓存的分析结果） - 使用并发分析
-            if not self.enhanced_ai_analyzer:
-                self.enhanced_ai_analyzer = create_enhanced_analyzer(
-                    max_concurrent=5,
-                    use_async=True,
-                    timeout_seconds=300,
-                    rate_limit=50
-                )
+            # 快速分析（如果没有缓存的分析结果）
+            if not self.ai_analyzer:
+                self.ai_analyzer = AIAnalyzer()
             
-            results = self.enhanced_ai_analyzer.enhanced_batch_analyze(news_list[:5])
+            # 逐个分析前5条新闻用于邮件
+            results = []
+            for news_item in news_list[:5]:
+                try:
+                    result = self.ai_analyzer.analyze_news(news_item)
+                    results.append(result)
+                except Exception as e:
+                    logger.error(f"分析新闻失败: {e}")
+                    continue
             
             # 发送邮件
             success = self.email_sender.send_analysis_report(results)
@@ -894,16 +883,27 @@ class TaskScheduler:
                 news_item.importance_reasoning = result.reasoning
                 news_item.importance_factors = result.key_factors
 
-            # 3. 并发AI分析（EnhancedAIAnalyzer）以获取影响程度（impact_level）
-            logger.info("开始AI影响分析（并发）...")
-            if not self.enhanced_ai_analyzer:
-                self.enhanced_ai_analyzer = create_enhanced_analyzer(
-                    max_concurrent=self.config.get('scheduler', {}).get('concurrent_requests', 10),
-                    use_async=True,
-                    timeout_seconds=30,
-                    rate_limit=self.config.get('scheduler', {}).get('rate_limit', 100)
-                )
-            ai_results = self.enhanced_ai_analyzer.enhanced_batch_analyze(news_list)
+            # 3. AI分析以获取影响程度
+            logger.info("开始AI影响分析...")
+            if not self.ai_analyzer:
+                self.ai_analyzer = AIAnalyzer()
+            
+            ai_results = []
+            for news_item in news_list:
+                try:
+                    result = self.ai_analyzer.analyze_news(news_item)
+                    ai_results.append(result)
+                except Exception as e:
+                    logger.error(f"AI分析失败: {e}")
+                    # 创建默认结果
+                    from .ai.ai_analyzer import AnalysisResult
+                    default_result = AnalysisResult(
+                        news_id=news_item.id,
+                        impact_score=0,
+                        summary="分析失败",
+                        analysis_time=datetime.now()
+                    )
+                    ai_results.append(default_result)
 
             # 4. 将AI分析的影响级别映射到NewsItem.impact_degree
             try:
@@ -1300,7 +1300,6 @@ class TaskScheduler:
             components_status = {
                 'news_collector': self.news_collector is not None,
                 'ai_analyzer': self.ai_analyzer is not None,
-                'enhanced_ai_analyzer': self.enhanced_ai_analyzer is not None,
                 'importance_analyzer': self.importance_analyzer is not None,
                 'email_sender': self.email_sender is not None,
                 'database': True,  # 基本检查

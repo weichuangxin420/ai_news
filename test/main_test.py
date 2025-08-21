@@ -20,6 +20,7 @@ from test_api import run_api_tests
 from test_news_collection import run_news_collection_tests
 from test_ai_analysis import run_ai_analysis_tests
 from test_database import run_database_tests
+from test_email import run_all_email_tests
 
 # 并发分析功能已集成到主AI分析器中，测试已简化至核心功能
 CONCURRENT_AVAILABLE = False
@@ -122,6 +123,28 @@ class TestRunner:
             }
             return {}
     
+    def run_email_tests(self) -> Dict[str, dict]:
+        """运行邮件功能测试"""
+        print("\n📧 运行邮件功能测试")
+        print("=" * 80)
+        
+        try:
+            results = run_all_email_tests()
+            self.results["email_tests"] = {
+                "status": "completed", 
+                "results": results,
+                "timestamp": datetime.now().isoformat()
+            }
+            return results
+        except Exception as e:
+            print(f"❌ 邮件功能测试运行失败: {e}")
+            self.results["email_tests"] = {
+                "status": "failed",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+            return {}
+    
 
     
     def run_all_tests(self) -> Dict[str, dict]:
@@ -143,6 +166,9 @@ class TestRunner:
         # 4. AI分析测试（包含核心功能和并发测试）
         self.run_ai_analysis_tests()
         
+        # 5. 邮件功能测试
+        self.run_email_tests()
+        
         self.end_time = time.time()
         
         # 显示总结
@@ -159,7 +185,8 @@ class TestRunner:
             "api": self.run_api_tests,
             "collection": self.run_news_collection_tests,
             "analysis": self.run_ai_analysis_tests,
-            "database": self.run_database_tests
+            "database": self.run_database_tests,
+            "email": self.run_email_tests
         }
         
 
@@ -209,9 +236,10 @@ class TestRunner:
             status_icon = "✅" if module_result["status"] == "completed" else "❌"
             module_display_name = {
                 "api_tests": "API数据源测试",
-                "news_collection_tests": "新闻收集测试", 
+                "news_collection_tests": "新闻收集测试",
                 "ai_analysis_tests": "AI分析核心功能测试",
-                "database_tests": "数据库测试"
+                "database_tests": "数据库测试",
+                "email_tests": "邮件功能测试"
             }.get(module_name, module_name)
             
             print(f"{status_icon} {module_display_name}")
@@ -220,9 +248,16 @@ class TestRunner:
                 # 显示各模块内部的详细统计
                 inner_results = module_result.get("results", {})
                 if inner_results:
-                    success_count = len([r for r in inner_results.values() if r.get("status") == "success"])
-                    total_count = len(inner_results)
-                    print(f"     内部测试: {success_count}/{total_count} 通过")
+                    # 检查是否是统计格式（新的格式）
+                    if "total" in inner_results and "success" in inner_results:
+                        total_count = inner_results.get("total", 0)
+                        success_count = inner_results.get("success", 0)
+                        print(f"     内部测试: {success_count}/{total_count} 通过")
+                    # 旧格式兼容
+                    elif isinstance(inner_results, dict) and inner_results:
+                        success_count = len([r for r in inner_results.values() if isinstance(r, dict) and r.get("status") == "success"])
+                        total_count = len(inner_results)
+                        print(f"     内部测试: {success_count}/{total_count} 通过")
             else:
                 error = module_result.get("error", "未知错误")
                 print(f"     错误: {error}")
@@ -277,21 +312,22 @@ def main():
   api         - 测试API数据源连接和数据获取
   collection  - 测试新闻收集功能
   analysis    - 测试AI分析核心功能（已简化）
-
   database    - 测试数据库操作
+  email       - 测试邮件发送功能
   all         - 运行所有测试（默认）
 
 使用示例:
   python main_test.py                    # 运行所有测试
   python main_test.py --module api       # 只测试API
   python main_test.py --module database  # 只测试数据库
+  python main_test.py --module email     # 只测试邮件功能
   python main_test.py --save results.json # 保存结果到logs文件夹中的指定文件
         """
     )
     
     parser.add_argument(
         '--module', '-m',
-        choices=['api', 'collection', 'analysis', 'database', 'all'],
+        choices=['api', 'collection', 'analysis', 'database', 'email', 'all'],
         default='all',
         help='指定要运行的测试模块'
     )

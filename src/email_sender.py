@@ -293,30 +293,36 @@ class EmailSender:
         Returns:
             str: HTML内容
         """
+        # 导入数据库管理器获取完整新闻信息
+        from .utils.database import DatabaseManager
+        
+        # 获取新闻详细信息
+        db_manager = DatabaseManager()
+        news_details = {}
+        for result in analysis_results:
+            news_item = db_manager.get_news_item_by_id(result.news_id)
+            if news_item:
+                news_details[result.news_id] = news_item
+        
         # 统计信息
         total_news = len(analysis_results)
-        positive_count = sum(1 for r in analysis_results if r.sentiment == '正面')
-        negative_count = sum(1 for r in analysis_results if r.sentiment == '负面')
-        neutral_count = sum(1 for r in analysis_results if r.sentiment == '中性')
+        # 根据影响分数判断情感倾向
+        positive_count = sum(1 for r in analysis_results if r.impact_score > 5)
+        negative_count = sum(1 for r in analysis_results if r.impact_score < -5)
+        neutral_count = total_news - positive_count - negative_count
         
-        # 板块影响统计
-        sector_impact = {}
-        for result in analysis_results:
-            for sector in result.affected_sectors:
-                if sector not in sector_impact:
-                    sector_impact[sector] = {'count': 0, 'total_score': 0}
-                sector_impact[sector]['count'] += 1
-                sector_impact[sector]['total_score'] += result.impact_score
+        # 按影响分数排序新闻
+        sorted_results = sorted(analysis_results, key=lambda x: abs(x.impact_score), reverse=True)
         
-        # 排序板块
-        sorted_sectors = sorted(
-            sector_impact.items(),
-            key=lambda x: abs(x[1]['total_score']),
-            reverse=True
-        )[:10]
+        # 高影响新闻（影响分数绝对值大于10的）
+        high_impact_results = [r for r in analysis_results if abs(r.impact_score) > 10]
         
-        # 高影响新闻
-        high_impact_results = [r for r in analysis_results if r.impact_level == '高']
+        # 重要性等级统计
+        high_importance = sum(1 for r in analysis_results 
+                            if news_details.get(r.news_id) and news_details[r.news_id].importance_score >= 80)
+        medium_importance = sum(1 for r in analysis_results 
+                              if news_details.get(r.news_id) and 50 <= news_details[r.news_id].importance_score < 80)
+        low_importance = total_news - high_importance - medium_importance
         
         # 生成HTML
         html_content = f"""
@@ -324,143 +330,214 @@ class EmailSender:
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>AI新闻影响分析报告</title>
     <style>
+        * {{
+            box-sizing: border-box;
+        }}
         body {{
-            font-family: 'Microsoft YaHei', Arial, sans-serif;
-            line-height: 1.6;
+            font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+            line-height: 1.4;
             margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
+            padding: 10px;
+            background-color: #f8f9fa;
+            font-size: 13px;
         }}
         .container {{
-            max-width: 800px;
+            max-width: 100%;
             margin: 0 auto;
             background-color: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }}
         .header {{
             text-align: center;
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 20px;
-            margin-bottom: 30px;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
         }}
         .header h1 {{
             color: #2c3e50;
             margin: 0;
-            font-size: 28px;
+            font-size: 18px;
+            font-weight: 600;
         }}
         .header .datetime {{
-            color: #7f8c8d;
-            font-size: 14px;
-            margin-top: 10px;
+            color: #6c757d;
+            font-size: 11px;
+            margin-top: 8px;
         }}
         .summary {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #007acc 0%, #0056b3 100%);
             color: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 30px;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
         }}
         .summary h2 {{
-            margin: 0 0 15px 0;
-            font-size: 20px;
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            font-weight: 600;
+        }}
+        .summary p {{
+            margin: 0 0 12px 0;
+            font-size: 12px;
         }}
         .stats {{
             display: flex;
-            justify-content: space-between;
-            margin-top: 15px;
+            justify-content: space-around;
+            margin-top: 12px;
         }}
         .stat-item {{
             text-align: center;
             flex: 1;
         }}
         .stat-number {{
-            font-size: 24px;
+            font-size: 18px;
             font-weight: bold;
             display: block;
         }}
         .stat-label {{
-            font-size: 12px;
+            font-size: 10px;
             opacity: 0.9;
         }}
         .section {{
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }}
         .section h3 {{
             color: #2c3e50;
-            border-left: 4px solid #3498db;
-            padding-left: 15px;
-            margin-bottom: 20px;
+            border-left: 3px solid #007acc;
+            padding-left: 10px;
+            margin: 0 0 15px 0;
+            font-size: 14px;
+            font-weight: 600;
         }}
-        .sector-list {{
-            list-style: none;
-            padding: 0;
-        }}
-        .sector-item {{
-            background: #ecf0f1;
-            margin: 8px 0;
-            padding: 12px 15px;
-            border-radius: 5px;
+        .importance-stats {{
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
         }}
-        .impact-positive {{ color: #27ae60; font-weight: bold; }}
-        .impact-negative {{ color: #e74c3c; font-weight: bold; }}
-        .impact-neutral {{ color: #95a5a6; }}
-        .news-item {{
+        .importance-item {{
+            flex: 1;
             background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 15px 0;
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            border: 1px solid #e9ecef;
+        }}
+        .importance-high {{ border-color: #dc3545; color: #dc3545; }}
+        .importance-medium {{ border-color: #ffc107; color: #856404; }}
+        .importance-low {{ border-color: #28a745; color: #28a745; }}
+        .news-item {{
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 10px 0;
+            border-left: 4px solid #dee2e6;
+        }}
+        .news-item.high-impact {{
+            border-left-color: #dc3545;
+            background: #fef8f8;
+        }}
+        .news-item.positive {{
+            border-left-color: #28a745;
+        }}
+        .news-item.negative {{
+            border-left-color: #dc3545;
         }}
         .news-header {{
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            gap: 5px;
+        }}
+        .news-title {{
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 13px;
+            line-height: 1.3;
+            margin: 0;
+            flex: 1;
+        }}
+        .news-meta {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
             align-items: center;
-            margin-bottom: 15px;
+            margin: 8px 0;
         }}
         .impact-score {{
-            background: #3498db;
+            background: #6c757d;
             color: white;
-            padding: 5px 12px;
-            border-radius: 20px;
+            padding: 2px 6px;
+            border-radius: 10px;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 10px;
+            white-space: nowrap;
         }}
-        .sentiment {{
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: bold;
+        .impact-score.positive {{ background: #28a745; }}
+        .impact-score.negative {{ background: #dc3545; }}
+        .importance-badge {{
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+            white-space: nowrap;
         }}
-        .sentiment.positive {{ background: #d4edda; color: #155724; }}
-        .sentiment.negative {{ background: #f8d7da; color: #721c24; }}
-        .sentiment.neutral {{ background: #e2e3e5; color: #383d41; }}
-        .sectors {{
+        .importance-badge.high {{ background: #f8d7da; color: #721c24; }}
+        .importance-badge.medium {{ background: #fff3cd; color: #856404; }}
+        .importance-badge.low {{ background: #d4edda; color: #155724; }}
+        .news-source {{
             color: #6c757d;
-            font-size: 14px;
-            margin: 10px 0;
+            font-size: 10px;
         }}
-        .recommendation {{
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            padding: 15px;
-            border-radius: 5px;
-            margin-top: 15px;
+        .news-time {{
+            color: #6c757d;
+            font-size: 10px;
+        }}
+        .news-summary {{
+            color: #495057;
+            font-size: 12px;
+            line-height: 1.4;
+            margin: 8px 0 0 0;
+        }}
+        .news-content {{
+            font-size: 11px;
+            color: #6c757d;
+            margin-top: 5px;
+            line-height: 1.3;
+            max-height: 60px;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }}
         .footer {{
             text-align: center;
-            color: #7f8c8d;
-            font-size: 12px;
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #ecf0f1;
+            color: #6c757d;
+            font-size: 10px;
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }}
+        .all-news {{
+            margin-top: 10px;
+        }}
+        /* 移动端优化 */
+        @media (max-width: 480px) {{
+            body {{ padding: 5px; font-size: 12px; }}
+            .container {{ padding: 10px; }}
+            .header h1 {{ font-size: 16px; }}
+            .summary h2 {{ font-size: 14px; }}
+            .section h3 {{ font-size: 13px; }}
+            .news-title {{ font-size: 12px; }}
+            .news-summary {{ font-size: 11px; }}
+            .stats {{ flex-wrap: wrap; }}
+            .stat-item {{ margin: 5px 0; }}
+            .importance-stats {{ flex-direction: column; }}
         }}
     </style>
 </head>
@@ -477,64 +554,76 @@ class EmailSender:
             <div class="stats">
                 <div class="stat-item">
                     <span class="stat-number">{positive_count}</span>
-                    <span class="stat-label">正面新闻</span>
+                    <span class="stat-label">正面影响</span>
                 </div>
                 <div class="stat-item">
                     <span class="stat-number">{negative_count}</span>
-                    <span class="stat-label">负面新闻</span>
+                    <span class="stat-label">负面影响</span>
                 </div>
                 <div class="stat-item">
                     <span class="stat-number">{neutral_count}</span>
-                    <span class="stat-label">中性新闻</span>
+                    <span class="stat-label">中性影响</span>
                 </div>
             </div>
         </div>
         
         <div class="section">
-            <h3>📈 板块影响排名</h3>
-            <ul class="sector-list">
-"""
-
-        # 添加板块影响列表
-        for sector, data in sorted_sectors:
-            avg_score = data['total_score'] / data['count']
-            impact_class = 'impact-positive' if avg_score > 0 else 'impact-negative' if avg_score < 0 else 'impact-neutral'
-            html_content += f"""
-                <li class="sector-item">
-                    <span><strong>{sector}</strong> ({data['count']}条新闻)</span>
-                    <span class="{impact_class}">平均影响: {avg_score:.1f}</span>
-                </li>
-"""
-
-        html_content += """
-            </ul>
+            <h3>📊 重要性等级分布</h3>
+            <div class="importance-stats">
+                <div class="importance-item importance-high">
+                    <div style="font-weight: bold; font-size: 14px;">{high_importance}</div>
+                    <div style="font-size: 10px;">高重要性</div>
+                </div>
+                <div class="importance-item importance-medium">
+                    <div style="font-weight: bold; font-size: 14px;">{medium_importance}</div>
+                    <div style="font-size: 10px;">中重要性</div>
+                </div>
+                <div class="importance-item importance-low">
+                    <div style="font-weight: bold; font-size: 14px;">{low_importance}</div>
+                    <div style="font-size: 10px;">低重要性</div>
+                </div>
+            </div>
         </div>
 """
 
-        # 添加高影响新闻
+        # 添加高影响新闻部分
         if high_impact_results:
             html_content += f"""
         <div class="section">
-            <h3>🔥 高影响新闻分析 ({len(high_impact_results)}条)</h3>
+            <h3>🔥 高影响新闻 ({len(high_impact_results)}条)</h3>
 """
-            for i, result in enumerate(high_impact_results[:5], 1):
-                sentiment_class = 'positive' if result.sentiment == '正面' else 'negative' if result.sentiment == '负面' else 'neutral'
-                score_color = '#27ae60' if result.impact_score > 0 else '#e74c3c' if result.impact_score < 0 else '#95a5a6'
+            for result in high_impact_results[:5]:  # 只显示前5条
+                news_item = news_details.get(result.news_id)
+                if not news_item:
+                    continue
+                    
+                # 确定样式类
+                impact_class = 'positive' if result.impact_score > 0 else 'negative' if result.impact_score < 0 else ''
+                score_class = 'positive' if result.impact_score > 0 else 'negative' if result.impact_score < 0 else ''
+                
+                # 重要性等级
+                importance_level = 'high' if news_item.importance_score >= 80 else 'medium' if news_item.importance_score >= 50 else 'low'
+                importance_text = '高' if importance_level == 'high' else '中' if importance_level == 'medium' else '低'
+                
+                # 格式化时间
+                time_str = news_item.publish_time.strftime('%m-%d %H:%M') if news_item.publish_time else ''
                 
                 html_content += f"""
-            <div class="news-item">
+            <div class="news-item high-impact {impact_class}">
                 <div class="news-header">
-                    <span class="impact-score" style="background-color: {score_color}">
-                        影响评分: {result.impact_score:.1f}
-                    </span>
-                    <span class="sentiment {sentiment_class}">{result.sentiment}</span>
+                    <h4 class="news-title">{news_item.title}</h4>
                 </div>
-                <div class="sectors">
-                    <strong>影响板块:</strong> {', '.join(result.affected_sectors)}
+                <div class="news-meta">
+                    <span class="impact-score {score_class}">影响: {result.impact_score:.1f}</span>
+                    <span class="importance-badge {importance_level}">重要性: {importance_text}</span>
+                    <span class="news-source">{news_item.source}</span>
+                    <span class="news-time">{time_str}</span>
                 </div>
-                <p><strong>分析摘要:</strong> {result.summary}</p>
-                <div class="recommendation">
-                    <strong>💡 投资建议:</strong> {result.recommendation}
+                <div class="news-summary">
+                    <strong>AI分析:</strong> {result.summary}
+                </div>
+                <div class="news-content">
+                    {news_item.content[:200]}{'...' if len(news_item.content) > 200 else ''}
                 </div>
             </div>
 """
@@ -543,12 +632,56 @@ class EmailSender:
         </div>
 """
 
+        # 添加所有新闻列表
+        html_content += f"""
+        <div class="section">
+            <h3>📰 全部新闻分析 ({total_news}条)</h3>
+            <div class="all-news">
+"""
+
+        for result in sorted_results:
+            news_item = news_details.get(result.news_id)
+            if not news_item:
+                continue
+                
+            # 确定样式类
+            impact_class = 'positive' if result.impact_score > 0 else 'negative' if result.impact_score < 0 else ''
+            score_class = 'positive' if result.impact_score > 0 else 'negative' if result.impact_score < 0 else ''
+            
+            # 重要性等级
+            importance_level = 'high' if news_item.importance_score >= 80 else 'medium' if news_item.importance_score >= 50 else 'low'
+            importance_text = '高' if importance_level == 'high' else '中' if importance_level == 'medium' else '低'
+            
+            # 格式化时间
+            time_str = news_item.publish_time.strftime('%m-%d %H:%M') if news_item.publish_time else ''
+            
+            html_content += f"""
+                <div class="news-item {impact_class}">
+                    <div class="news-header">
+                        <h4 class="news-title">{news_item.title}</h4>
+                    </div>
+                    <div class="news-meta">
+                        <span class="impact-score {score_class}">影响: {result.impact_score:.1f}</span>
+                        <span class="importance-badge {importance_level}">重要性: {importance_text}</span>
+                        <span class="news-source">{news_item.source}</span>
+                        <span class="news-time">{time_str}</span>
+                    </div>
+                    <div class="news-summary">
+                        <strong>AI分析:</strong> {result.summary}
+                    </div>
+                </div>
+"""
+
         # 添加页脚
         html_content += f"""
+            </div>
+        </div>
+        
         <div class="footer">
             <p>本报告由AI新闻收集与影响分析系统自动生成</p>
-            <p>数据来源: 多渠道新闻源 | 分析引擎: DeepSeek AI | 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p style="color: #e74c3c; font-size: 10px;">免责声明: 本报告仅供参考，投资有风险，决策需谨慎</p>
+            <p>数据来源: 多渠道新闻源 | 分析引擎: DeepSeek AI</p>
+            <p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p style="color: #dc3545; font-size: 9px;">⚠️ 免责声明: 本报告仅供参考，投资有风险，决策需谨慎</p>
         </div>
     </div>
 </body>

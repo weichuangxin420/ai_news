@@ -13,7 +13,7 @@ from typing import Dict, List
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ai.ai_analyzer import AIAnalyzer, create_enhanced_analyzer
+from src.ai.ai_analyzer import AIAnalyzer
 from src.utils.database import NewsItem, db_manager
 from src.utils.logger import get_logger
 
@@ -26,7 +26,6 @@ class AIAnalysisTester:
     def __init__(self):
         """初始化测试器"""
         self.analyzer = None
-        self.enhanced_analyzer = None
         self.results = {}
         
     def test_analyzer_initialization(self) -> bool:
@@ -36,21 +35,11 @@ class AIAnalysisTester:
         try:
             # 测试标准分析器
             self.analyzer = AIAnalyzer()
-            print("✅ 标准AI分析器初始化成功")
-            
-            # 测试增强分析器（主流程使用）
-            self.enhanced_analyzer = create_enhanced_analyzer(
-                max_concurrent=5,
-                use_async=True,
-                timeout_seconds=30,
-                rate_limit=50
-            )
-            print("✅ 增强AI分析器初始化成功")
+            print("✅ AI分析器初始化成功")
                 
             self.results["initialization"] = {
                 "status": "success",
-                "standard_analyzer": True,
-                "enhanced_analyzer": True
+                "analyzer_available": True
             }
             return True
             
@@ -98,67 +87,6 @@ class AIAnalysisTester:
             self.results["single_analysis"] = result
             return result
 
-    def test_enhanced_batch_analysis(self, batch_size: int = 3) -> Dict[str, any]:
-        """测试增强批量分析（主流程核心功能）"""
-        print(f"\n🚀 测试增强批量分析（{batch_size}条）")
-        print("-" * 60)
-        
-        if not self.enhanced_analyzer:
-            print("❌ 增强分析器未初始化")
-            return {"status": "failed", "error": "enhanced_analyzer_not_initialized"}
-            
-        try:
-            # 获取测试新闻
-            test_news_list = self._get_test_news_for_analysis(batch_size)
-            
-            if not test_news_list:
-                print("❌ 没有可分析的新闻")
-                return {"status": "failed", "error": "no_news_available"}
-            
-            print(f"🔍 开始增强批量分析 {len(test_news_list)} 条新闻...")
-            
-            start_time = time.time()
-            results = self.enhanced_analyzer.enhanced_batch_analyze(test_news_list)
-            end_time = time.time()
-            
-            analysis_time = end_time - start_time
-            
-            print(f"✅ 增强批量分析完成")
-            print(f"   分析数量: {len(results)}")
-            print(f"   总用时: {analysis_time:.2f}秒")
-            print(f"   平均用时: {analysis_time/max(len(results),1):.2f}秒/条")
-            
-            # 显示分析结果示例
-            if results:
-                print(f"\n📋 分析结果示例:")
-                for i, result in enumerate(results[:3], 1):
-                    print(f"   {i}. 影响评分: {result.impact_score}/100")
-                    print(f"      摘要: {result.summary[:50]}...")
-                    if i < 3:
-                        print()
-            
-            test_result = {
-                "status": "success",
-                "analyzed_count": len(results),
-                "total_time": analysis_time,
-                "average_time": analysis_time/max(len(results),1),
-                "sample_results": [
-                    {
-                        "impact_score": result.impact_score,
-                        "summary": result.summary[:50]
-                    } for result in results[:2]
-                ]
-            }
-            
-            self.results["enhanced_batch_analysis"] = test_result
-            return test_result
-            
-        except Exception as e:
-            print(f"❌ 增强批量分析失败: {e}")
-            result = {"status": "failed", "error": str(e)}
-            self.results["enhanced_batch_analysis"] = result
-            return result
-
     def test_mock_analysis(self) -> Dict[str, any]:
         """测试模拟分析功能（降级逻辑）"""
         print("\n🎭 测试模拟分析功能")
@@ -193,20 +121,6 @@ class AIAnalysisTester:
             result = {"status": "failed", "error": str(e)}
             self.results["mock_analysis"] = result
             return result
-
-    def _get_test_news_for_analysis(self, limit: int) -> List[NewsItem]:
-        """获取用于分析的测试新闻"""
-        # 首先尝试从数据库获取
-        from datetime import datetime, timedelta
-        start_time = datetime.now() - timedelta(hours=24)
-        recent_news = db_manager.get_news_items(limit=limit, start_time=start_time)
-        
-        if recent_news:
-            print(f"   从数据库获取 {len(recent_news)} 条最近新闻")
-            return recent_news
-        else:
-            print(f"   数据库中没有新闻，创建 {limit} 条测试新闻")
-            return self._create_test_news()[:limit]
 
     def _create_test_news(self) -> List[NewsItem]:
         """创建测试新闻数据"""
@@ -259,10 +173,7 @@ class AIAnalysisTester:
         # 2. 测试单条分析（基础功能）
         self.test_single_news_analysis()
         
-        # 3. 测试增强批量分析（主流程核心）
-        self.test_enhanced_batch_analysis()
-        
-        # 4. 测试模拟分析（降级逻辑）
+        # 3. 测试模拟分析（降级逻辑）
         self.test_mock_analysis()
         
         # 显示测试总结
@@ -288,12 +199,6 @@ class AIAnalysisTester:
         for test_name, result in self.results.items():
             status_icon = "✅" if result.get("status") == "success" else "❌"
             print(f"{status_icon} {test_name}")
-            
-            if result.get("status") == "success":
-                if test_name == "enhanced_batch_analysis":
-                    count = result.get("analyzed_count", 0)
-                    avg_time = result.get("average_time", 0)
-                    print(f"   分析了 {count} 条新闻，平均 {avg_time:.2f}秒/条")
 
 
 def run_ai_analysis_tests():
