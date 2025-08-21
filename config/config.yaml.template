@@ -31,7 +31,7 @@ ai_analysis:
   # DeepSeek配置
   deepseek:
     api_key: "YOUR_DEEPSEEK_API_KEY"  # 请替换为你的DeepSeek API密钥
-    model: "deepseek-reasoner"  # 使用思考模型
+    model: "deepseek-chat"  # 使用deepseek-chat模型
     fallback_model: "deepseek-chat"  # 备用模型
     base_url: "https://api.deepseek.com/v1"
     max_tokens: 2000
