@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import openai
 import yaml
@@ -585,10 +586,57 @@ class AIAnalyzer:
             "api_available": self.client is not None,
         }
 
+    def analyze_news_batch(self, news_items: List[NewsItem], max_workers: Optional[int] = None) -> List[AnalysisResult]:
+        """
+        并行分析多条新闻
+        
+        Args:
+            news_items: 新闻列表
+            max_workers: 最大工作线程数，默认从配置获取
+            
+        Returns:
+            List[AnalysisResult]: 分析结果列表
+        """
+        if not news_items:
+            return []
+            
+        # 获取并发配置
+        if max_workers is None:
+            analysis_params = self.config.get("ai_analysis", {}).get("analysis_params", {})
+            max_workers = analysis_params.get("max_concurrent", 5)
+        
+        logger.info(f"开始并行分析 {len(news_items)} 条新闻，最大并发数: {max_workers}")
+        
+        results = []
+        
+        # 使用线程池并行处理
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有任务
+            future_to_news = {
+                executor.submit(self.analyze_news, news_item): news_item 
+                for news_item in news_items
+            }
+            
+            # 收集结果
+            for future in as_completed(future_to_news):
+                news_item = future_to_news[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    logger.debug(f"完成分析: {news_item.title[:50]}...")
+                except Exception as e:
+                    logger.error(f"并行分析失败 [{news_item.title[:50]}...]: {e}")
+                    # 创建错误回退结果
+                    error_result = self._error_fallback_analysis(news_item)
+                    results.append(error_result)
+        
+        logger.info(f"并行分析完成，成功处理 {len(results)} 条新闻")
+        return results
+
 
 def analyze_latest_news(limit: int = 20) -> List[AnalysisResult]:
     """
-    便捷函数：分析最新新闻
+    便捷函数：分析最新新闻（并行版本）
 
     Args:
         limit: 分析的新闻数量限制
@@ -603,15 +651,9 @@ def analyze_latest_news(limit: int = 20) -> List[AnalysisResult]:
         logger.info("没有找到待分析的新闻")
         return []
 
-    # 逐个分析新闻
-    results = []
-    for news_item in news_list:
-        try:
-            result = analyzer.analyze_news(news_item)
-            results.append(result)
-        except Exception as e:
-            logger.error(f"分析新闻失败: {e}")
-            continue
+    # 使用并行分析
+    logger.info(f"开始并行分析 {len(news_list)} 条新闻")
+    results = analyzer.analyze_news_batch(news_list)
     
     return results
 

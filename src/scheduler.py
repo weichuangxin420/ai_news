@@ -130,6 +130,102 @@ class TaskScheduler:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
     
+    def _filter_news_by_score(self, news_list: List, min_score: int) -> List:
+        """
+        根据重要性分数过滤新闻
+        
+        Args:
+            news_list: 新闻列表
+            min_score: 最低分数阈值
+            
+        Returns:
+            List: 过滤后的新闻列表
+        """
+        if not news_list:
+            return []
+        
+        try:
+            # 确保所有新闻都有重要性分数
+            filtered_news = []
+            for news in news_list:
+                if hasattr(news, 'importance_score') and isinstance(news.importance_score, (int, float)):
+                    if news.importance_score >= min_score:
+                        filtered_news.append(news)
+                else:
+                    logger.warning(f"新闻缺少有效的重要性分数: {getattr(news, 'title', 'unknown')}")
+            
+            if len(filtered_news) != len(news_list):
+                logger.debug(f"分数过滤: {len(news_list)} -> {len(filtered_news)} (阈值: {min_score})")
+            
+            return filtered_news
+            
+        except Exception as e:
+            logger.error(f"过滤新闻时出错: {e}")
+            return []
+    
+    def _calculate_news_stats(self, news_list: List) -> Dict[str, int]:
+        """
+        计算新闻统计信息
+        
+        Args:
+            news_list: 新闻列表
+            
+        Returns:
+            Dict: 包含各种统计信息的字典
+        """
+        if not news_list:
+            return {'total': 0, 'high': 0, 'medium': 0, 'low': 0, 'avg_score': 0}
+        
+        total_count = len(news_list)
+        high_count = len([news for news in news_list if news.importance_score >= 70])
+        medium_count = len([news for news in news_list if 50 <= news.importance_score < 70])
+        low_count = len([news for news in news_list if news.importance_score < 50])
+        avg_score = sum(news.importance_score for news in news_list) / total_count
+        
+        return {
+            'total': total_count,
+            'high': high_count,
+            'medium': medium_count,
+            'low': low_count,
+            'avg_score': avg_score
+        }
+    
+    def _validate_config(self) -> bool:
+        """
+        验证配置文件的完整性
+        
+        Returns:
+            bool: 配置是否有效
+        """
+        try:
+            required_sections = ['email', 'scheduler']
+            
+            for section in required_sections:
+                if section not in self.config:
+                    logger.error(f"配置文件缺少必需的部分: {section}")
+                    return False
+            
+            # 验证邮件配置
+            email_config = self.config.get('email', {})
+            smtp_config = email_config.get('smtp', {})
+            
+            required_email_fields = ['username', 'password', 'smtp_server', 'smtp_port']
+            for field in required_email_fields:
+                if not smtp_config.get(field):
+                    logger.warning(f"邮件配置缺少字段: {field}")
+            
+            # 验证收件人列表
+            recipients = email_config.get('recipients', [])
+            if not recipients:
+                logger.warning("未配置邮件收件人")
+            
+            logger.info("配置验证完成")
+            return True
+            
+        except Exception as e:
+            logger.error(f"配置验证失败: {e}")
+            return False
+    
     def _signal_handler(self, signum, frame):
         """信号处理器"""
         logger.info(f"接收到信号 {signum}，正在优雅关闭...")
@@ -793,13 +889,20 @@ class TaskScheduler:
                 logger.info("没有新闻数据，跳过邮件发送")
                 return False
             
+            # 过滤分数低于50的新闻
+            filtered_news = self._filter_news_by_score(news_list, 50)
+            
+            if not filtered_news:
+                logger.info(f"有 {len(news_list)} 条新闻，但没有分数达到50分的重要新闻，跳过邮件发送")
+                return False
+            
             # 快速分析（如果没有缓存的分析结果）
             if not self.ai_analyzer:
                 self.ai_analyzer = AIAnalyzer()
             
-            # 逐个分析前5条新闻用于邮件
+            # 逐个分析过滤后的新闻用于邮件
             results = []
-            for news_item in news_list[:5]:
+            for news_item in filtered_news[:5]:
                 try:
                     result = self.ai_analyzer.analyze_news(news_item)
                     results.append(result)
@@ -811,7 +914,7 @@ class TaskScheduler:
             success = self.email_sender.send_analysis_report(results)
             
             if success:
-                logger.info("邮件发送任务完成")
+                logger.info(f"邮件发送任务完成，包含 {len(results)} 条重要新闻（原始 {len(news_list)} 条）")
             else:
                 logger.error("邮件发送任务失败")
             
@@ -833,7 +936,7 @@ class TaskScheduler:
             if news_count > 0:
                 analysis_count = self._analysis_task()
                 
-                # 3. 邮件发送（如果有分析结果）
+                # 3. 邮件发送（如果有分析结果，会自动过滤分数低于50的新闻）
                 if analysis_count > 0:
                     email_success = self._email_task()
                     
@@ -888,22 +991,9 @@ class TaskScheduler:
             if not self.ai_analyzer:
                 self.ai_analyzer = AIAnalyzer()
             
-            ai_results = []
-            for news_item in news_list:
-                try:
-                    result = self.ai_analyzer.analyze_news(news_item)
-                    ai_results.append(result)
-                except Exception as e:
-                    logger.error(f"AI分析失败: {e}")
-                    # 创建默认结果
-                    from .ai.ai_analyzer import AnalysisResult
-                    default_result = AnalysisResult(
-                        news_id=news_item.id,
-                        impact_score=0,
-                        summary="分析失败",
-                        analysis_time=datetime.now()
-                    )
-                    ai_results.append(default_result)
+            # 使用并行分析替代逐个分析
+            logger.info(f"开始并行AI分析 {len(news_list)} 条新闻")
+            ai_results = self.ai_analyzer.analyze_news_batch(news_list)
 
             # 4. 将AI分析的影响级别映射到NewsItem.impact_degree
             try:
@@ -935,9 +1025,15 @@ class TaskScheduler:
             news_list = self.collect_and_analyze_news()
             
             if news_list:
-                # 发送邮件
-                self._send_instant_email(news_list, "早间新闻报告")
-                logger.info(f"早间新闻报告发送完成，包含 {len(news_list)} 条新闻")
+                # 过滤分数低于50的新闻
+                filtered_news = self._filter_news_by_score(news_list, 50)
+                
+                if filtered_news:
+                    # 发送邮件
+                    self._send_instant_email(filtered_news, "早间新闻报告")
+                    logger.info(f"早间新闻报告发送完成，包含 {len(filtered_news)} 条新闻（原始 {len(news_list)} 条）")
+                else:
+                    logger.info(f"早间收集到 {len(news_list)} 条新闻，但没有分数达到50分的重要新闻，跳过邮件发送")
                 
         except Exception as e:
             logger.error(f"早上8点任务执行失败: {e}")
@@ -953,11 +1049,19 @@ class TaskScheduler:
             if time(8, 0) <= current_time <= time(16, 0):
                 logger.info("=== 执行交易时间收集任务 ===")
                 
-                # 收集和分析新闻，但不发送邮件
+                # 收集和分析新闻，所有新闻都存入数据库
                 news_list = self.collect_and_analyze_news()
                 
                 if news_list:
-                    logger.info(f"交易时间收集到 {len(news_list)} 条新闻")
+                    # 对于交易时间收集的新闻，只有分数>=70的才发送即时邮件
+                    high_priority_news = self._filter_news_by_score(news_list, 70)
+                    
+                    if high_priority_news:
+                        # 发送即时邮件
+                        self._send_instant_email(high_priority_news, "交易时间重要新闻")
+                        logger.info(f"交易时间收集到 {len(news_list)} 条新闻，发送 {len(high_priority_news)} 条高优先级新闻邮件")
+                    else:
+                        logger.info(f"交易时间收集到 {len(news_list)} 条新闻，但无分数达到70分的重要新闻，已存入数据库，等待晚上汇总")
             else:
                 logger.debug("当前不在交易时间，跳过收集")
                 
@@ -985,7 +1089,7 @@ class TaskScheduler:
         try:
             logger.info("=== 生成每日汇总邮件 ===")
             
-            # 获取今天的所有新闻
+            # 获取今天的所有新闻（包括交易时间收集但未即时发送的新闻）
             today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             today_news = db_manager.get_news_items_by_date_range(today_start, datetime.now())
             
@@ -996,13 +1100,16 @@ class TaskScheduler:
             # 按重要性排序
             sorted_news = sorted(today_news, key=lambda x: x.importance_score, reverse=True)
             
-            # 生成汇总报告
-            report = self._generate_daily_summary_report(sorted_news)
+            # 统计信息（在生成报告前计算，避免重复）
+            stats = self._calculate_news_stats(sorted_news)
+            
+            # 生成汇总报告（包含所有新闻，不进行分数过滤，因为这是汇总邮件）
+            report = self._generate_daily_summary_report(sorted_news, stats)
             
             # 发送邮件
             self._send_summary_email(report)
             
-            logger.info(f"每日汇总邮件发送成功，包含 {len(sorted_news)} 条新闻")
+            logger.info(f"每日汇总邮件发送成功，包含 {len(sorted_news)} 条新闻（高重要性: {stats['high']}, 中等: {stats['medium']}, 低重要性: {stats['low']}）")
             
         except Exception as e:
             logger.error(f"每日汇总邮件发送失败: {e}")
@@ -1062,8 +1169,15 @@ class TaskScheduler:
             if not self.email_sender:
                 self.email_sender = EmailSender()
             
+            # 过滤分数低于50的新闻
+            filtered_news = self._filter_news_by_score(news_list, 50)
+            
+            if not filtered_news:
+                logger.info(f"要发送的 {len(news_list)} 条新闻中没有分数达到50分的，跳过邮件发送")
+                return
+            
             # 按重要性排序
-            sorted_news = sorted(news_list, key=lambda x: x.importance_score, reverse=True)
+            sorted_news = sorted(filtered_news, key=lambda x: x.importance_score, reverse=True)
             
             # 生成报告
             report = self._generate_instant_report(sorted_news)
@@ -1080,7 +1194,7 @@ class TaskScheduler:
                 is_html=True
             )
             
-            logger.info(f"即时邮件发送成功: {title_prefix}")
+            logger.info(f"即时邮件发送成功: {title_prefix}，包含 {len(sorted_news)} 条重要新闻（原始 {len(news_list)} 条）")
             
         except Exception as e:
             logger.error(f"发送即时邮件失败: {e}")
@@ -1177,15 +1291,18 @@ class TaskScheduler:
         
         return html
     
-    def _generate_daily_summary_report(self, news_list) -> str:
+    def _generate_daily_summary_report(self, news_list, stats: Dict[str, int] = None) -> str:
         """生成每日汇总报告（HTML格式）"""
         
-        # 统计信息
-        total_count = len(news_list)
-        high_importance = len([n for n in news_list if n.importance_score >= 70])
-        medium_importance = len([n for n in news_list if 40 <= n.importance_score < 70])
-        low_importance = len([n for n in news_list if n.importance_score < 40])
-        avg_score = sum(n.importance_score for n in news_list) / total_count if total_count > 0 else 0
+        # 使用传入的统计信息或计算新的
+        if stats is None:
+            stats = self._calculate_news_stats(news_list)
+        
+        total_count = stats['total']
+        high_importance = stats['high'] 
+        medium_importance = stats['medium']
+        low_importance = stats['low']
+        avg_score = stats['avg_score']
         
         html = f"""
         <!DOCTYPE html>
@@ -1343,6 +1460,10 @@ class TaskScheduler:
         """
         try:
             logger.info("正在启动任务调度器（增强版）...")
+            
+            # 验证配置
+            if not self._validate_config():
+                logger.warning("配置验证失败，但继续启动（可能影响功能）")
             
             # 加载状态
             self.load_state()

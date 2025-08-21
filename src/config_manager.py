@@ -134,7 +134,12 @@ class ConfigManager:
                     "max_tokens": 2000,
                     "temperature": 0.1,
                 },
-                "analysis_params": {"batch_size": 10, "timeout": 30, "retry_count": 3},
+                "analysis_params": {
+                    "batch_size": 10, 
+                    "max_concurrent": 5,
+                    "timeout": 30, 
+                    "retry_count": 3
+                },
             },
             "email": {
                 "smtp": {"server": "smtp.qq.com", "port": 587, "use_tls": True},

@@ -32,6 +32,7 @@ ai_analysis:
   deepseek:
     api_key: "YOUR_DEEPSEEK_API_KEY"  # 请替换为你的DeepSeek API密钥
     model: "deepseek-reasoner"  # 使用思考模型
+    fallback_model: "deepseek-chat"  # 备用模型
     base_url: "https://api.deepseek.com/v1"
     max_tokens: 2000
     temperature: 0.1
@@ -39,8 +40,12 @@ ai_analysis:
   # 分析参数
   analysis_params:
     batch_size: 10  # 每批分析的新闻数量
-    timeout: 30     # 超时时间（秒）
+    max_concurrent: 5  # 最大并发分析数
+    timeout: 600     # 超时时间（秒）
+    fallback_timeout: 600  # 备用模型超时时间（秒）
     retry_count: 3  # 重试次数
+    enable_retry: true
+    retry_delay: 1.0
 
 # 邮件发送配置
 email:
