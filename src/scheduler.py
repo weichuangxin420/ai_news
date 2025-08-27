@@ -17,8 +17,6 @@ from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 import yaml
 import signal
 import sys
-from pathlib import Path
-import pickle
 
 from .collectors.news_collector import NewsCollector
 from .ai.ai_analyzer import AIAnalyzer
@@ -56,6 +54,9 @@ class TaskScheduler:
         # 任务执行历史
         self.execution_history = []
         self.max_history_size = 100
+        
+        # 线程安全锁
+        self._lock = threading.Lock()
         
         # 健康监控
         self.health_status = {
@@ -177,10 +178,24 @@ class TaskScheduler:
             return {'total': 0, 'high': 0, 'medium': 0, 'low': 0, 'avg_score': 0}
         
         total_count = len(news_list)
-        high_count = len([news for news in news_list if news.importance_score >= 70])
-        medium_count = len([news for news in news_list if 50 <= news.importance_score < 70])
-        low_count = len([news for news in news_list if news.importance_score < 50])
-        avg_score = sum(news.importance_score for news in news_list) / total_count
+        high_count = 0
+        medium_count = 0
+        low_count = 0
+        total_score = 0
+        
+        # 单次遍历计算所有统计信息
+        for news in news_list:
+            score = news.importance_score
+            total_score += score
+            
+            if score >= 70:
+                high_count += 1
+            elif score >= 50:
+                medium_count += 1
+            else:
+                low_count += 1
+        
+        avg_score = total_score / total_count
         
         return {
             'total': total_count,
@@ -240,18 +255,21 @@ class TaskScheduler:
     
     def _job_executed_listener(self, event):
         """任务执行事件监听器"""
-        self.stats['total_executions'] += 1
-        self.stats['last_execution_time'] = datetime.now().isoformat()
+        with self._lock:
+            self.stats['total_executions'] += 1
+            self.stats['last_execution_time'] = datetime.now().isoformat()
+            
+            if event.exception:
+                self.stats['failed_executions'] += 1
+            else:
+                self.stats['successful_executions'] += 1
         
+        # 记录事件（使用独立的锁）
         if event.exception:
-            self.stats['failed_executions'] += 1
             logger.error(f"任务执行失败: {event.job_id}, 异常: {event.exception}")
-            # 记录错误事件
             self.record_event('job_failed', False, f"任务 {event.job_id} 执行失败: {event.exception}")
         else:
-            self.stats['successful_executions'] += 1
             logger.info(f"任务执行成功: {event.job_id}")
-            # 记录成功事件
             self.record_event('job_executed', True, f"任务 {event.job_id} 执行成功")
     
     # ===== 状态管理功能 =====
@@ -300,7 +318,7 @@ class TaskScheduler:
                 temp_file = self.state_file + '.tmp'
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
-            except:
+            except OSError:
                 pass
     
     def load_state(self):
@@ -342,11 +360,12 @@ class TaskScheduler:
             'message': message
         }
         
-        self.execution_history.append(event)
-        
-        # 限制历史记录数量
-        if len(self.execution_history) > self.max_history_size:
-            self.execution_history = self.execution_history[-self.max_history_size:]
+        with self._lock:
+            self.execution_history.append(event)
+            
+            # 限制历史记录数量
+            if len(self.execution_history) > self.max_history_size:
+                self.execution_history = self.execution_history[-self.max_history_size:]
         
         logger.debug(f"记录事件: {event_type} - {message}")
     
@@ -622,9 +641,6 @@ class TaskScheduler:
             
             self.news_collector = NewsCollector()
             self.ai_analyzer = AIAnalyzer()
-            
-
-            
             self.importance_analyzer = ImportanceAnalyzer()
             self.email_sender = EmailSender()
             
@@ -876,9 +892,6 @@ class TaskScheduler:
             if not self.email_sender:
                 self.email_sender = EmailSender()
             
-            if not self.ai_analyzer:
-                self.ai_analyzer = AIAnalyzer()
-            
             # 获取最近的分析结果
             recent_hours = self.config.get('scheduler', {}).get('email_recent_hours', 24)
             cutoff_time = datetime.now() - timedelta(hours=recent_hours)
@@ -895,10 +908,6 @@ class TaskScheduler:
             if not filtered_news:
                 logger.info(f"有 {len(news_list)} 条新闻，但没有分数达到50分的重要新闻，跳过邮件发送")
                 return False
-            
-            # 快速分析（如果没有缓存的分析结果）
-            if not self.ai_analyzer:
-                self.ai_analyzer = AIAnalyzer()
             
             # 逐个分析过滤后的新闻用于邮件
             results = []
@@ -997,7 +1006,6 @@ class TaskScheduler:
 
             # 4. 将AI分析的影响级别映射到NewsItem.impact_degree
             try:
-                from .ai.ai_analyzer import AnalysisResult as _AR
                 # ai_results 与 news_list 一一对应
                 for news_item, ar in zip(news_list, ai_results):
                     if hasattr(ar, 'impact_level'):
@@ -1042,11 +1050,10 @@ class TaskScheduler:
     def _trading_hours_collection(self):
         """交易时间收集（8:00-16:00）"""
         try:
-            from datetime import time
             current_time = datetime.now().time()
             
             # 只在交易时间执行
-            if time(8, 0) <= current_time <= time(16, 0):
+            if datetime.time(8, 0) <= current_time <= datetime.time(16, 0):
                 logger.info("=== 执行交易时间收集任务 ===")
                 
                 # 收集和分析新闻，所有新闻都存入数据库
