@@ -224,7 +224,7 @@ class TaskScheduler:
             email_config = self.config.get('email', {})
             smtp_config = email_config.get('smtp', {})
             
-            required_email_fields = ['username', 'password', 'smtp_server', 'smtp_port']
+            required_email_fields = ['username', 'password', 'server', 'port']
             for field in required_email_fields:
                 if not smtp_config.get(field):
                     logger.warning(f"邮件配置缺少字段: {field}")
