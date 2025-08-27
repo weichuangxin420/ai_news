@@ -22,6 +22,7 @@ from test_ai_analysis import run_ai_analysis_tests
 from test_database import run_database_tests
 from test_email import run_all_email_tests
 from test_openrouter_api import TestOpenRouterAPI
+from test_deep_analysis import run_deep_analysis_tests
 
 # 并发分析功能已集成到主AI分析器中，测试已简化至核心功能
 CONCURRENT_AVAILABLE = False
@@ -188,6 +189,28 @@ class TestRunner:
             }
             return {}
     
+    def run_deep_analysis_tests(self) -> Dict[str, dict]:
+        """运行深度分析测试"""
+        print("\n🔍 运行深度分析测试")
+        print("=" * 80)
+        
+        try:
+            results = run_deep_analysis_tests()
+            self.results["deep_analysis_tests"] = {
+                "status": "completed",
+                "results": results,
+                "timestamp": datetime.now().isoformat()
+            }
+            return results
+        except Exception as e:
+            print(f"❌ 深度分析测试运行失败: {e}")
+            self.results["deep_analysis_tests"] = {
+                "status": "failed", 
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+            return {}
+    
 
     
     def run_all_tests(self) -> Dict[str, dict]:
@@ -209,7 +232,10 @@ class TestRunner:
         # 4. AI分析测试（包含核心功能和并发测试）
         self.run_ai_analysis_tests()
         
-        # 5. 邮件功能测试
+        # 5. 深度分析测试
+        self.run_deep_analysis_tests()
+        
+        # 6. 邮件功能测试
         self.run_email_tests()
         
         self.end_time = time.time()
@@ -228,6 +254,7 @@ class TestRunner:
             "api": self.run_api_tests,
             "collection": self.run_news_collection_tests,
             "analysis": self.run_ai_analysis_tests,
+            "deep_analysis": self.run_deep_analysis_tests,
             "database": self.run_database_tests,
             "email": self.run_email_tests
         }
@@ -281,6 +308,7 @@ class TestRunner:
                 "api_tests": "API数据源测试",
                 "news_collection_tests": "新闻收集测试",
                 "ai_analysis_tests": "AI分析核心功能测试 + OpenRouter",
+                "deep_analysis_tests": "深度分析测试",
                 "database_tests": "数据库测试",
                 "email_tests": "邮件功能测试"
             }.get(module_name, module_name)
@@ -355,22 +383,24 @@ def main():
   api         - 测试API数据源连接和数据获取
   collection  - 测试新闻收集功能
   analysis    - 测试AI分析核心功能 + OpenRouter（已简化）
+  deep_analysis - 测试深度分析功能（高重要性新闻的百度搜索和深度分析）
   database    - 测试数据库操作
   email       - 测试邮件发送功能
   all         - 运行所有测试（默认）
 
 使用示例:
-  python main_test.py                    # 运行所有测试
-  python main_test.py --module api       # 只测试API
-  python main_test.py --module database  # 只测试数据库
-  python main_test.py --module email     # 只测试邮件功能
-  python main_test.py --save results.json # 保存结果到logs文件夹中的指定文件
+  python main_test.py                        # 运行所有测试
+  python main_test.py --module api           # 只测试API
+  python main_test.py --module deep_analysis # 只测试深度分析功能
+  python main_test.py --module database      # 只测试数据库
+  python main_test.py --module email         # 只测试邮件功能
+  python main_test.py --save results.json    # 保存结果到logs文件夹中的指定文件
         """
     )
     
     parser.add_argument(
         '--module', '-m',
-        choices=['api', 'collection', 'analysis', 'database', 'email', 'all'],
+        choices=['api', 'collection', 'analysis', 'deep_analysis', 'database', 'email', 'all'],
         default='all',
         help='指定要运行的测试模块'
     )

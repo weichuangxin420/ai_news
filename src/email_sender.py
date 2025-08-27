@@ -492,6 +492,45 @@ class EmailSender:
         .importance-badge.high {{ background: #f8d7da; color: #721c24; }}
         .importance-badge.medium {{ background: #fff3cd; color: #856404; }}
         .importance-badge.low {{ background: #d4edda; color: #155724; }}
+        .deep-analysis-badge {{
+            background: #e7f3ff;
+            color: #0056b3;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 500;
+            white-space: nowrap;
+            border: 1px solid #b8daff;
+        }}
+        .score-adjustment {{
+            font-size: 9px;
+            color: #28a745;
+            font-weight: 500;
+        }}
+        .deep-analysis {{
+            background: #f8f9fa;
+            border-left: 3px solid #007acc;
+            padding: 8px;
+            margin: 8px 0;
+            border-radius: 4px;
+        }}
+        .deep-analysis h5 {{
+            margin: 0 0 5px 0;
+            font-size: 11px;
+            color: #007acc;
+            font-weight: 600;
+        }}
+        .search-keywords {{
+            font-size: 9px;
+            color: #6c757d;
+            margin: 3px 0;
+        }}
+        .search-keywords span {{
+            background: #e9ecef;
+            padding: 1px 4px;
+            border-radius: 2px;
+            margin-right: 3px;
+        }}
         .news-source {{
             color: #6c757d;
             font-size: 10px;
@@ -651,6 +690,11 @@ class EmailSender:
                 importance_level = 'high' if news_item.importance_score >= 80 else 'medium' if news_item.importance_score >= 50 else 'low'
                 importance_text = '高' if importance_level == 'high' else '中' if importance_level == 'medium' else '低'
                 
+                # 深度分析相关
+                has_deep_analysis = bool(getattr(news_item, 'deep_analysis_report', ''))
+                adjusted_score = getattr(news_item, 'adjusted_importance_score', None)
+                search_keywords = getattr(news_item, 'search_keywords', [])
+                
                 # 格式化时间
                 time_str = news_item.publish_time.strftime('%m-%d %H:%M') if news_item.publish_time else ''
                 
@@ -665,7 +709,11 @@ class EmailSender:
                 </div>
                 <div class="news-meta">
                     <span class="impact-score {score_class}">影响: {result.impact_score:.1f}</span>
-                    <span class="importance-badge {importance_level}">重要性: {importance_text}</span>
+                    <span class="importance-badge {importance_level}">
+                        重要性: {importance_text}
+                        {f'→{adjusted_score}分' if adjusted_score is not None and adjusted_score != news_item.importance_score else f'{news_item.importance_score}分'}
+                    </span>
+                    {f'<span class="deep-analysis-badge">深度分析</span>' if has_deep_analysis else ''}
                     <span class="news-source">{news_item.source}</span>
                     <span class="news-time">{time_str}</span>
                 </div>
@@ -676,6 +724,13 @@ class EmailSender:
                     </div>
                     {summary_button}
                 </div>
+                {f'''
+                <div class="deep-analysis">
+                    <h5>🔍 深度分析报告</h5>
+                    <div>{news_item.deep_analysis_report}</div>
+                    {f'<div class="search-keywords">搜索关键词: {" ".join([f"<span>{kw}</span>" for kw in search_keywords])}</div>' if search_keywords else ''}
+                </div>
+                ''' if has_deep_analysis else ''}
                 <div class="news-content">
                     <strong>新闻内容:</strong>
                     <div class="expandable-content content-{'short' if len(news_item.content) > 200 else 'full'}">
@@ -710,6 +765,11 @@ class EmailSender:
             importance_level = 'high' if news_item.importance_score >= 80 else 'medium' if news_item.importance_score >= 50 else 'low'
             importance_text = '高' if importance_level == 'high' else '中' if importance_level == 'medium' else '低'
             
+            # 深度分析相关
+            has_deep_analysis = bool(getattr(news_item, 'deep_analysis_report', ''))
+            adjusted_score = getattr(news_item, 'adjusted_importance_score', None)
+            search_keywords = getattr(news_item, 'search_keywords', [])
+            
             # 格式化时间
             time_str = news_item.publish_time.strftime('%m-%d %H:%M') if news_item.publish_time else ''
             
@@ -724,7 +784,11 @@ class EmailSender:
                     </div>
                     <div class="news-meta">
                         <span class="impact-score {score_class}">影响: {result.impact_score:.1f}</span>
-                        <span class="importance-badge {importance_level}">重要性: {importance_text}</span>
+                        <span class="importance-badge {importance_level}">
+                            重要性: {importance_text}
+                            {f'→{adjusted_score}分' if adjusted_score is not None and adjusted_score != news_item.importance_score else f'{news_item.importance_score}分'}
+                        </span>
+                        {f'<span class="deep-analysis-badge">深度分析</span>' if has_deep_analysis else ''}
                         <span class="news-source">{news_item.source}</span>
                         <span class="news-time">{time_str}</span>
                     </div>
@@ -735,6 +799,13 @@ class EmailSender:
                         </div>
                         {summary_button}
                     </div>
+                    {f'''
+                    <div class="deep-analysis">
+                        <h5>🔍 深度分析报告</h5>
+                        <div>{news_item.deep_analysis_report}</div>
+                        {f'<div class="search-keywords">搜索关键词: {" ".join([f"<span>{kw}</span>" for kw in search_keywords])}</div>' if search_keywords else ''}
+                    </div>
+                    ''' if has_deep_analysis else ''}
                     <div class="news-content">
                         <strong>新闻内容:</strong>
                         <div class="expandable-content content-{'short' if len(news_item.content) > 200 else 'full'}">

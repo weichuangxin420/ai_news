@@ -22,6 +22,7 @@ import sys
 from .collectors.news_collector import NewsCollector
 from .ai.ai_analyzer import AIAnalyzer
 from .ai.importance_analyzer import ImportanceAnalyzer
+from .ai.deep_analyzer import DeepAnalyzer
 from .email_sender import EmailSender
 from .utils.logger import get_logger
 from .utils.database import db_manager
@@ -83,8 +84,8 @@ class TaskScheduler:
         # 组件实例
         self.news_collector = None
         self.ai_analyzer = None
-
         self.importance_analyzer = None
+        self.deep_analyzer = None
         self.email_sender = None
         
         # 设置事件监听器和信号处理器
@@ -425,6 +426,8 @@ class TaskScheduler:
                 'scheduler': scheduler_healthy,
                 'news_collector': self.news_collector is not None,
                 'ai_analyzer': self.ai_analyzer is not None,
+                'importance_analyzer': self.importance_analyzer is not None,
+                'deep_analyzer': self.deep_analyzer is not None,
                 'email_sender': self.email_sender is not None
             }
             
@@ -643,6 +646,7 @@ class TaskScheduler:
             self.news_collector = NewsCollector()
             self.ai_analyzer = AIAnalyzer()
             self.importance_analyzer = ImportanceAnalyzer()
+            self.deep_analyzer = DeepAnalyzer()
             self.email_sender = EmailSender()
             
             logger.info("组件初始化完成")
@@ -996,7 +1000,22 @@ class TaskScheduler:
                 news_item.importance_reasoning = result.reasoning
                 news_item.importance_factors = result.key_factors
 
-            # 3. AI分析以获取影响程度
+            # 3. 深度分析（针对高重要性新闻）
+            logger.info("开始深度分析高重要性新闻...")
+            if not self.deep_analyzer:
+                self.deep_analyzer = DeepAnalyzer()
+            
+            deep_analysis_results = self.deep_analyzer.batch_analyze_deep(news_list)
+            
+            # 将深度分析结果应用到对应的新闻项
+            deep_analysis_dict = {result.news_id: result for result in deep_analysis_results}
+            for news_item in news_list:
+                if news_item.id in deep_analysis_dict:
+                    deep_result = deep_analysis_dict[news_item.id]
+                    news_item.update_with_deep_analysis(deep_result)
+                    logger.debug(f"应用深度分析结果: {news_item.title[:30]}... -> {deep_result.adjusted_score}分")
+
+            # 4. AI分析以获取影响程度
             logger.info("开始AI影响分析...")
             if not self.ai_analyzer:
                 self.ai_analyzer = AIAnalyzer()
@@ -1005,7 +1024,7 @@ class TaskScheduler:
             logger.info(f"开始并行AI分析 {len(news_list)} 条新闻")
             ai_results = self.ai_analyzer.analyze_news_batch(news_list)
 
-            # 4. 将AI分析的影响级别映射到NewsItem.impact_degree
+            # 5. 将AI分析的影响级别映射到NewsItem.impact_degree
             try:
                 # ai_results 与 news_list 一一对应
                 for news_item, ar in zip(news_list, ai_results):
@@ -1014,10 +1033,10 @@ class TaskScheduler:
             except Exception as _e:
                 logger.warning(f"映射影响程度失败: {_e}")
 
-            # 5. 保存到数据库（包含重要性与影响程度）
+            # 6. 保存到数据库（包含重要性、深度分析与影响程度）
             if save_to_db:
                 saved_count = db_manager.save_news_items_batch(news_list)
-                logger.info(f"保存 {saved_count} 条新闻（含重要性与影响程度）到数据库")
+                logger.info(f"保存 {saved_count} 条新闻（含重要性、深度分析与影响程度）到数据库")
             
             return news_list
             
@@ -1426,6 +1445,7 @@ class TaskScheduler:
                 'news_collector': self.news_collector is not None,
                 'ai_analyzer': self.ai_analyzer is not None,
                 'importance_analyzer': self.importance_analyzer is not None,
+                'deep_analyzer': self.deep_analyzer is not None,
                 'email_sender': self.email_sender is not None,
                 'database': True,  # 基本检查
                 'scheduler': self.is_running

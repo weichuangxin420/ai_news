@@ -32,6 +32,12 @@ class NewsItem:
         importance_reasoning: str = "",
         importance_factors: List[str] = None,
         impact_degree: str = "",  # 新增：影响程度（高/中/低）
+        # 深度分析相关字段
+        deep_analysis_report: str = "",
+        adjusted_importance_score: int = None,
+        search_keywords: List[str] = None,
+        search_summary: str = "",
+        deep_analysis_time: datetime = None,
     ):
         self.id = id
         self.title = title
@@ -45,6 +51,12 @@ class NewsItem:
         self.importance_reasoning = importance_reasoning
         self.importance_factors = importance_factors or []
         self.impact_degree = impact_degree
+        # 深度分析相关字段
+        self.deep_analysis_report = deep_analysis_report
+        self.adjusted_importance_score = adjusted_importance_score
+        self.search_keywords = search_keywords or []
+        self.search_summary = search_summary
+        self.deep_analysis_time = deep_analysis_time
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
 
@@ -65,6 +77,14 @@ class NewsItem:
             "importance_reasoning": self.importance_reasoning,
             "importance_factors": json.dumps(self.importance_factors, ensure_ascii=False),
             "impact_degree": self.impact_degree,
+            # 深度分析相关字段
+            "deep_analysis_report": self.deep_analysis_report,
+            "adjusted_importance_score": self.adjusted_importance_score,
+            "search_keywords": json.dumps(self.search_keywords, ensure_ascii=False),
+            "search_summary": self.search_summary,
+            "deep_analysis_time": (
+                self.deep_analysis_time.isoformat() if self.deep_analysis_time else None
+            ),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -109,8 +129,39 @@ class NewsItem:
         
         # 新增：影响程度
         item.impact_degree = data.get("impact_degree", "")
+        
+        # 深度分析相关字段
+        item.deep_analysis_report = data.get("deep_analysis_report", "")
+        item.adjusted_importance_score = data.get("adjusted_importance_score")
+        item.search_summary = data.get("search_summary", "")
+        
+        # 处理搜索关键词
+        search_keywords_str = data.get("search_keywords", "[]")
+        try:
+            item.search_keywords = json.loads(search_keywords_str) if search_keywords_str else []
+        except (json.JSONDecodeError, TypeError):
+            item.search_keywords = []
+        
+        # 处理深度分析时间
+        if data.get("deep_analysis_time"):
+            item.deep_analysis_time = datetime.fromisoformat(data["deep_analysis_time"])
 
         return item
+    
+    def update_with_deep_analysis(self, deep_analysis_result):
+        """
+        使用深度分析结果更新新闻项
+        
+        Args:
+            deep_analysis_result: DeepAnalysisResult对象
+        """
+        self.deep_analysis_report = deep_analysis_result.deep_analysis_report
+        self.adjusted_importance_score = deep_analysis_result.adjusted_score
+        self.search_keywords = deep_analysis_result.search_keywords
+        self.search_summary = deep_analysis_result.search_results_summary
+        if deep_analysis_result.analysis_time:
+            self.deep_analysis_time = datetime.fromisoformat(deep_analysis_result.analysis_time)
+        self.updated_at = datetime.now()
 
 
 class DatabaseManager:
@@ -181,6 +232,32 @@ class DatabaseManager:
                     cursor.execute("SELECT impact_degree FROM news_items LIMIT 1")
                 except Exception:
                     cursor.execute("ALTER TABLE news_items ADD COLUMN impact_degree TEXT")
+
+                # 增量迁移：添加深度分析相关字段
+                try:
+                    cursor.execute("SELECT deep_analysis_report FROM news_items LIMIT 1")
+                except Exception:
+                    cursor.execute("ALTER TABLE news_items ADD COLUMN deep_analysis_report TEXT")
+                
+                try:
+                    cursor.execute("SELECT adjusted_importance_score FROM news_items LIMIT 1")
+                except Exception:
+                    cursor.execute("ALTER TABLE news_items ADD COLUMN adjusted_importance_score INTEGER")
+                
+                try:
+                    cursor.execute("SELECT search_keywords FROM news_items LIMIT 1")
+                except Exception:
+                    cursor.execute("ALTER TABLE news_items ADD COLUMN search_keywords TEXT")
+                
+                try:
+                    cursor.execute("SELECT search_summary FROM news_items LIMIT 1")
+                except Exception:
+                    cursor.execute("ALTER TABLE news_items ADD COLUMN search_summary TEXT")
+                
+                try:
+                    cursor.execute("SELECT deep_analysis_time FROM news_items LIMIT 1")
+                except Exception:
+                    cursor.execute("ALTER TABLE news_items ADD COLUMN deep_analysis_time TEXT")
 
                 # 索引
                 cursor.execute(

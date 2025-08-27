@@ -227,7 +227,7 @@ class AIAnalyzer:
 
         # 记录API请求详情
         model = ai_config.get("model", default_model)
-        max_tokens = ai_config.get("max_tokens", 2000)
+        max_tokens = ai_config.get("max_tokens", 10000)
         temperature = ai_config.get("temperature", 0.1)
         timeout = analysis_params.get("timeout", 600)  # 默认10分钟
         base_url = ai_config.get("base_url", default_base_url)
