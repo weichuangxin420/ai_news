@@ -9,6 +9,7 @@ import json
 import time
 import threading
 from datetime import datetime, timedelta
+from datetime import time as dt_time
 from typing import Dict, Any, Optional, Callable, List
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -1053,7 +1054,7 @@ class TaskScheduler:
             current_time = datetime.now().time()
             
             # 只在交易时间执行
-            if datetime.time(8, 0) <= current_time <= datetime.time(16, 0):
+            if dt_time(8, 0) <= current_time <= dt_time(16, 0):
                 logger.info("=== 执行交易时间收集任务 ===")
                 
                 # 收集和分析新闻，所有新闻都存入数据库
