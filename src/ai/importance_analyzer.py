@@ -202,9 +202,14 @@ class ImportanceAnalyzer:
         try:
             deepseek_config = self.config.get("ai_analysis", {}).get("deepseek", {})
             
-            # 使用思考模型
+            # 从配置文件获取思考模型型号，默认为deepseek-reasoner
+            thinking_model = deepseek_config.get("model", "deepseek-chat")
+            
+            logger.info(f"调用模型: {thinking_model}")
+            
+            # 使用配置的思考模型
             response = self.client.chat.completions.create(
-                model="deepseek-reasoner",  # 使用思考模型
+                model=thinking_model,
                 messages=[
                     {
                         "role": "user", 
@@ -244,6 +249,10 @@ class ImportanceAnalyzer:
             if not isinstance(key_factors, list):
                 key_factors = [str(key_factors)] if key_factors else ["未识别关键因素"]
             
+            # 从配置文件获取模型名称
+            deepseek_config = self.config.get("ai_analysis", {}).get("deepseek", {})
+            model_used = deepseek_config.get("thinking_model", "deepseek-reasoner")
+            
             return ImportanceResult(
                 news_id=news_item.id or f"news_{int(time.time())}",
                 title=news_item.title,
@@ -251,7 +260,7 @@ class ImportanceAnalyzer:
                 reasoning=reasoning,
                 key_factors=key_factors[:5],  # 最多保留5个关键因素
                 analysis_time=datetime.now().isoformat(),
-                model_used="deepseek-reasoner"
+                model_used=model_used
             )
             
         except Exception as e:
@@ -332,104 +341,6 @@ class ImportanceAnalyzer:
             analysis_time=datetime.now().isoformat(),
             model_used="mock_analyzer"
         )
-    
-    def get_top_important_news(self, results: List[ImportanceResult], top_n: int = 10) -> List[ImportanceResult]:
-        """
-        获取重要程度最高的新闻
-        
-        Args:
-            results: 分析结果列表
-            top_n: 返回前N条
-            
-        Returns:
-            List[ImportanceResult]: 按重要程度排序的前N条新闻
-        """
-        sorted_results = sorted(results, key=lambda x: x.importance_score, reverse=True)
-        return sorted_results[:top_n]
-    
-    def generate_importance_report(self, results: List[ImportanceResult]) -> str:
-        """
-        生成重要程度分析报告
-        
-        Args:
-            results: 分析结果列表
-            
-        Returns:
-            str: Markdown格式的报告
-        """
-        if not results:
-            return "# 新闻重要程度分析报告\n\n暂无分析结果。"
-        
-        # 统计信息
-        total_count = len(results)
-        avg_score = sum(r.importance_score for r in results) / total_count
-        high_importance = len([r for r in results if r.importance_score >= 70])
-        medium_importance = len([r for r in results if 40 <= r.importance_score < 70])
-        low_importance = len([r for r in results if r.importance_score < 40])
-        
-        # 获取最重要的新闻
-        top_important = self.get_top_important_news(results, 5)
-        
-        # 生成报告
-        report = f"""# 📊 新闻重要程度分析报告
-
-## 📈 总体统计
-
-- **分析新闻总数**: {total_count} 条
-- **平均重要程度**: {avg_score:.1f} 分
-- **高重要程度** (≥70分): {high_importance} 条 ({high_importance/total_count*100:.1f}%)
-- **中等重要程度** (40-69分): {medium_importance} 条 ({medium_importance/total_count*100:.1f}%)
-- **低重要程度** (<40分): {low_importance} 条 ({low_importance/total_count*100:.1f}%)
-
-## 🔥 最重要新闻排行榜
-
-"""
-        
-        for i, result in enumerate(top_important, 1):
-            report += f"""### {i}. {result.title}
-
-- **重要程度**: {result.importance_score} 分
-- **关键因素**: {', '.join(result.key_factors)}
-- **分析推理**: {result.reasoning[:200]}...
-
----
-
-"""
-        
-        report += f"""## 📋 详细分析列表
-
-| 排名 | 标题 | 评分 | 关键因素 |
-|------|------|------|----------|
-"""
-        
-        sorted_results = sorted(results, key=lambda x: x.importance_score, reverse=True)
-        for i, result in enumerate(sorted_results, 1):
-            factors_str = ', '.join(result.key_factors[:3])  # 只显示前3个因素
-            title_short = result.title[:50] + "..." if len(result.title) > 50 else result.title
-            report += f"| {i} | {title_short} | {result.importance_score} | {factors_str} |\n"
-        
-        report += f"""
-
----
-*报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
-*分析模型: DeepSeek思考模型*
-"""
-        
-        return report
-
-
-def analyze_importance(news_list: List[NewsItem]) -> List[ImportanceResult]:
-    """
-    便捷函数：分析新闻重要程度
-    
-    Args:
-        news_list: 新闻列表
-        
-    Returns:
-        List[ImportanceResult]: 重要程度分析结果列表
-    """
-    analyzer = ImportanceAnalyzer()
-    return analyzer.batch_analyze_importance(news_list)
 
 
 if __name__ == '__main__':

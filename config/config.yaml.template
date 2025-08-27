@@ -37,6 +37,14 @@ ai_analysis:
     max_tokens: 2000
     temperature: 0.1
   
+  # OpenRouter配置
+  openrouter:
+    api_key: "YOUR_OPENROUTER_API_KEY"  # 请替换为你的OpenRouter API密钥
+    base_url: "https://openrouter.ai/api/v1"
+    model: "deepseek/deepseek-r1-0528:free"  # 推荐免费的deepseek-r1模型
+    max_tokens: 2000
+    temperature: 0.1
+  
   # 分析参数
   analysis_params:
     batch_size: 10  # 每批分析的新闻数量

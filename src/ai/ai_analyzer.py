@@ -60,14 +60,16 @@ class AnalysisResult:
 class AIAnalyzer:
     """AI新闻分析器，支持单条新闻分析"""
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, provider: str = "openrouter"):
         """
         初始化AI分析器
 
         Args:
             config_path: 配置文件路径
+            provider: API提供商，支持 'deepseek' 或 'openrouter'
         """
         self.config = self._load_config(config_path)
+        self.provider = provider
         
         # 客户端设置
         self.client = None
@@ -76,7 +78,7 @@ class AIAnalyzer:
         self._setup_client()
 
         # 统计信息
-        self.stats = {"analyzed": 0, "errors": 0, "api_calls": 0, "total_tokens": 0}
+        self.stats = {"analyzed": 0, "errors": 0, "api_calls": 0, "total_tokens": 0, "provider": provider}
 
     def _load_config(self, config_path: Optional[str]) -> dict:
         """加载配置文件"""
@@ -93,30 +95,53 @@ class AIAnalyzer:
             return {}
 
     def _setup_client(self):
-        """设置OpenAI客户端（兼容DeepSeek API）"""
-        ai_config = self.config.get("ai_analysis", {}).get("deepseek", {})
+        """设置OpenAI客户端（兼容DeepSeek和OpenRouter API）"""
+        if self.provider == "openrouter":
+            ai_config = self.config.get("ai_analysis", {}).get("openrouter", {})
+            provider_name = "OpenRouter"
+            default_base_url = "https://openrouter.ai/api/v1"
+            config_path_info = "config/config.yaml -> ai_analysis -> openrouter -> api_key"
+        else:  # deepseek
+            ai_config = self.config.get("ai_analysis", {}).get("deepseek", {})
+            provider_name = "DeepSeek"
+            default_base_url = "https://api.deepseek.com/v1"
+            config_path_info = "config/config.yaml -> ai_analysis -> deepseek -> api_key"
 
-        # 从环境变量或配置文件获取API密钥
-        api_key = os.getenv("DEEPSEEK_API_KEY") or ai_config.get("api_key", "")
-        if api_key.startswith("${") and api_key.endswith("}"):
-            # 处理环境变量引用
-            env_var = api_key[2:-1]
-            api_key = os.getenv(env_var, "")
-
+        # 只从配置文件获取API密钥
+        api_key = ai_config.get("api_key", "")
+        
         if not api_key:
-            logger.warning("未找到DeepSeek API密钥，将使用模拟模式")
-            self.client = None
-            return
+            error_msg = f"配置文件中未找到{provider_name} API密钥，程序无法正常运行"
+            logger.error(error_msg)
+            logger.error(f"请在配置文件中添加相应的API密钥配置项")
+            logger.error(f"配置路径: {config_path_info}")
+            raise ValueError(error_msg)
 
         try:
+            base_url = ai_config.get("base_url", default_base_url)
+            logger.info(f"正在初始化{provider_name} API客户端，base_url: {base_url}")
+            
+            # OpenRouter需要设置额外的headers
+            extra_headers = {}
+            if self.provider == "openrouter":
+                extra_headers = {
+                    "HTTP-Referer": "https://ai-news-collector.com",  # 可选，用于在openrouter.ai排行榜显示
+                    "X-Title": "AI-News-Analysis-System",  # 可选，应用名称（使用英文避免编码问题）
+                }
+            
             self.client = OpenAI(
                 api_key=api_key,
-                base_url=ai_config.get("base_url", "https://api.deepseek.com/v1"),
+                base_url=base_url,
+                default_headers=extra_headers if extra_headers else None,
             )
-            logger.info("DeepSeek API客户端初始化成功")
+            logger.info(f"{provider_name} API客户端初始化成功")
+            
         except Exception as e:
-            logger.error(f"DeepSeek API客户端初始化失败: {e}")
-            self.client = None
+            error_msg = f"{provider_name} API客户端初始化失败: {e}"
+            logger.error(error_msg)
+            logger.error(f"API密钥长度: {len(api_key) if api_key else 0}")
+            logger.error(f"Base URL: {base_url}")
+            raise RuntimeError(error_msg)
 
     def analyze_news(self, news_item: NewsItem) -> AnalysisResult:
         """
@@ -128,47 +153,21 @@ class AIAnalyzer:
         Returns:
             AnalysisResult: 分析结果
         """
-        try:
-            if not self.client:
-                return self._mock_analysis(news_item)
+        if not self.client:
+            logger.error(f"{self.provider.upper()} API客户端不可用，无法进行分析")
+            raise RuntimeError(f"{self.provider.upper()} API客户端不可用")
 
-            # 构建提示词
-            prompt = self._build_analysis_prompt(news_item)
+        # 构建提示词
+        prompt = self._build_analysis_prompt(news_item)
 
-            # 首先尝试使用主模型（思考模型）
-            try:
-                response = self._call_deepseek_api(prompt)
-                result = self._parse_analysis_response(news_item.id, response)
-                self.stats["analyzed"] += 1
-                logger.debug(f"新闻分析完成（主模型）: {news_item.title[:50]}...")
-                return result
-                
-            except Exception as primary_error:
-                logger.warning(f"主模型分析失败，尝试备用模型: {primary_error}")
-                
-                # 使用备用模型重试
-                response = self._call_deepseek_api_fallback(prompt)
-                result = self._parse_analysis_response(news_item.id, response)
-                self.stats["analyzed"] += 1
-                logger.debug(f"新闻分析完成（备用模型）: {news_item.title[:50]}...")
-                return result
+        # 调用AI API进行分析
+        response = self._call_ai_api(prompt)
+        result = self._parse_analysis_response(news_item.id, response)
+        self.stats["analyzed"] += 1
+        logger.debug(f"新闻分析完成: {news_item.title[:50]}...")
+        return result
 
-        except Exception as e:
-            logger.error(f"新闻分析失败: {e}")
-            self.stats["errors"] += 1
-            return self._error_fallback_analysis(news_item)
 
-    def analyze_single_news(self, news_item: NewsItem) -> AnalysisResult:
-        """
-        分析单条新闻（别名方法，兼容测试）
-
-        Args:
-            news_item: 新闻项
-
-        Returns:
-            AnalysisResult: 分析结果
-        """
-        return self.analyze_news(news_item)
 
     def _build_analysis_prompt(self, news_item: NewsItem) -> str:
         """
@@ -181,32 +180,32 @@ class AIAnalyzer:
             str: 提示词
         """
         prompt = f"""
-请你作为一位专业的A股市场分析师，对以下新闻进行深度分析，重点关注其对A股市场的影响。
+                    请你作为一位专业的A股市场分析师，对以下新闻进行深度分析，重点关注其对A股市场的影响。
 
-新闻信息：
-标题：{news_item.title}
-内容：{news_item.content}
-来源：{news_item.source}
-发布时间：{news_item.publish_time}
-关键词：{', '.join(news_item.keywords)}
+                    新闻信息：
+                    标题：{news_item.title}
+                    内容：{news_item.content}
+                    来源：{news_item.source}
+                    发布时间：{news_item.publish_time}
+                    关键词：{', '.join(news_item.keywords)}
 
-请按照以下JSON格式输出分析结果：
-{{
-    "impact_score": 数值(0到100，数值越高影响越大),
-    "summary": "新闻影响摘要(100字以内)"
-}}
+                    请按照以下JSON格式输出分析结果：
+                    {{
+                        "impact_score": 数值(0到100，数值越高影响越大),
+                        "summary": "新闻影响摘要(100字以内)"
+                    }}
 
-分析要求：
-1. 影响评分范围：0（无影响）到 100（极度正面），数值越高影响越大
-2. 投资建议要具体、可操作，避免模糊表述
+                    分析要求：
+                    1. 影响评分范围：0（无影响）到 100（极度正面），数值越高影响越大
+                    2. 投资建议要具体、可操作，避免模糊表述
 
-请确保输出严格按照JSON格式，不要包含其他文本。
-"""
+                    请确保输出严格按照JSON格式，不要包含其他文本。
+                """
         return prompt.strip()
 
-    def _call_deepseek_api(self, prompt: str) -> str:
+    def _call_ai_api(self, prompt: str) -> str:
         """
-        调用DeepSeek API
+        调用AI API（支持DeepSeek和OpenRouter）
 
         Args:
             prompt: 提示词
@@ -214,17 +213,26 @@ class AIAnalyzer:
         Returns:
             str: API响应内容
         """
-        ai_config = self.config.get("ai_analysis", {}).get("deepseek", {})
+        # 根据provider获取对应的配置
+        if self.provider == "openrouter":
+            ai_config = self.config.get("ai_analysis", {}).get("openrouter", {})
+            default_model = "deepseek/deepseek-r1-0528:free"
+            default_base_url = "https://openrouter.ai/api/v1"
+        else:  # deepseek
+            ai_config = self.config.get("ai_analysis", {}).get("deepseek", {})
+            default_model = "deepseek-chat"
+            default_base_url = "https://api.deepseek.com/v1"
+        
         analysis_params = self.config.get("ai_analysis", {}).get("analysis_params", {})
 
         # 记录API请求详情
-        model = ai_config.get("model", "deepseek-chat")  # 默认使用deepseek-chat
+        model = ai_config.get("model", default_model)
         max_tokens = ai_config.get("max_tokens", 2000)
         temperature = ai_config.get("temperature", 0.1)
         timeout = analysis_params.get("timeout", 600)  # 默认10分钟
-        base_url = ai_config.get("base_url", "https://api.deepseek.com/v1")
+        base_url = ai_config.get("base_url", default_base_url)
         
-        logger.info(f"🔄 准备调用DeepSeek API")
+        logger.info(f"🔄 准备调用{self.provider.upper()} API")
         logger.info(f"   模型: {model}")
         logger.info(f"   基础URL: {base_url}")
         logger.info(f"   最大令牌: {max_tokens}")
@@ -241,10 +249,6 @@ class AIAnalyzer:
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "你是一位专业的A股市场分析师，具有丰富的股票投资经验和深厚的市场洞察力。请严格按照要求的JSON格式输出分析结果。",
-                    },
                     {"role": "user", "content": prompt},
                 ],
                 max_tokens=max_tokens,
@@ -279,7 +283,7 @@ class AIAnalyzer:
             end_time = time.time()
             response_time = end_time - start_time
             
-            logger.error(f"❌ DeepSeek API调用失败")
+            logger.error(f"❌ {self.provider.upper()} API调用失败")
             logger.error(f"   错误类型: {type(e).__name__}")
             logger.error(f"   错误信息: {str(e)}")
             logger.error(f"   失败时间: {response_time:.2f}秒")
@@ -298,65 +302,7 @@ class AIAnalyzer:
                 
             raise
 
-    def _call_deepseek_api_fallback(self, prompt: str) -> str:
-        """
-        调用DeepSeek API（备用模型）
 
-        Args:
-            prompt: 提示词
-
-        Returns:
-            str: API响应内容
-        """
-        ai_config = self.config.get("ai_analysis", {}).get("deepseek", {})
-        analysis_params = self.config.get("ai_analysis", {}).get("analysis_params", {})
-
-        # 使用备用模型配置
-        fallback_model = ai_config.get("fallback_model", "deepseek-chat")  # 默认使用deepseek-chat
-        fallback_timeout = analysis_params.get("fallback_timeout", 600)  # 默认10分钟
-        
-        logger.info(f"🔄 准备调用DeepSeek API（备用模型）")
-        logger.info(f"   备用模型: {fallback_model}")
-        logger.info(f"   备用超时: {fallback_timeout}秒")
-
-        try:
-            import time
-            start_time = time.time()
-            
-            logger.info(f"📤 开始备用API请求...")
-            
-            response = self.client.chat.completions.create(
-                model=fallback_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "你是一位专业的A股市场分析师，具有丰富的股票投资经验和深厚的市场洞察力。请严格按照要求的JSON格式输出分析结果。",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=ai_config.get("max_tokens", 2000),
-                temperature=ai_config.get("temperature", 0.1),
-                timeout=fallback_timeout,
-            )
-
-            end_time = time.time()
-            response_time = end_time - start_time
-            
-            logger.info(f"📥 备用API响应成功")
-            logger.info(f"   响应时间: {response_time:.2f}秒")
-
-            response_content = response.choices[0].message.content
-            logger.info(f"   响应内容长度: {len(response_content)} 字符")
-            
-            # 记录完整响应内容用于调试
-            logger.info(f"📄 备用API完整响应内容:")
-            logger.info(f"   {response_content}")
-
-            return response_content
-
-        except Exception as e:
-            logger.error(f"❌ 备用DeepSeek API调用也失败: {e}")
-            raise
 
     def _parse_analysis_response(self, news_id: str, response: str) -> AnalysisResult:
         """
@@ -396,86 +342,11 @@ class AIAnalyzer:
 
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             logger.error(f"解析API响应失败: {e}, 响应内容: {response[:200]}...")
-            return self._create_fallback_result(news_id, response)
+            raise ValueError(f"AI响应解析失败: {e}")
 
-    def _create_fallback_result(self, news_id: str, response: str) -> AnalysisResult:
-        """
-        创建后备分析结果
 
-        Args:
-            news_id: 新闻ID
-            response: 原始响应
 
-        Returns:
-            AnalysisResult: 后备分析结果
-        """
-        return AnalysisResult(
-            news_id=news_id,
-            impact_score=0,
-            summary="AI解析失败，使用默认分析结果",
-            analysis_time=datetime.now(),
-        )
 
-    def _mock_analysis(self, news_item: NewsItem) -> AnalysisResult:
-        """
-        模拟分析（当API不可用时）
-
-        Args:
-            news_item: 新闻项
-
-        Returns:
-            AnalysisResult: 模拟的分析结果
-        """
-        # 基于关键词的简单规则分析
-        title_content = f"{news_item.title} {news_item.content}".lower()
-
-        # 板块映射
-        sector_keywords = {
-            "科技": ["ai", "人工智能", "芯片", "半导体", "互联网", "云计算", "大数据"],
-            "金融": ["银行", "保险", "证券", "基金", "金融", "贷款"],
-            "医药": ["医药", "生物", "疫苗", "医疗", "健康", "制药"],
-            "新能源": ["新能源", "锂电池", "光伏", "风电", "电动车", "充电桩"],
-            "消费": ["消费", "零售", "电商", "食品", "饮料", "服装"],
-            "地产": ["房地产", "建筑", "地产", "楼市", "住房"],
-        }
-
-        # 简单情感分析
-        positive_words = ["上涨", "增长", "利好", "突破", "创新", "成功", "盈利"]
-        negative_words = ["下跌", "亏损", "风险", "危机", "失败", "暴跌", "问题"]
-
-        positive_score = sum(1 for word in positive_words if word in title_content)
-        negative_score = sum(1 for word in negative_words if word in title_content)
-
-        if positive_score > negative_score:
-            impact_score = min(positive_score * 15, 80)  # 调整到0-100范围
-        elif negative_score > positive_score:
-            impact_score = max(100 - negative_score * 15, 20)  # 负面影响用较低分数表示
-        else:
-            impact_score = 50  # 中性影响
-
-        return AnalysisResult(
-            news_id=news_item.id,
-            impact_score=impact_score,
-            summary=f"基于关键词分析，新闻对A股市场有{impact_score:.0f}分的影响",
-            analysis_time=datetime.now(),
-        )
-
-    def _error_fallback_analysis(self, news_item: NewsItem) -> AnalysisResult:
-        """
-        错误时的后备分析
-
-        Args:
-            news_item: 新闻项
-
-        Returns:
-            AnalysisResult: 后备分析结果
-        """
-        return AnalysisResult(
-            news_id=news_item.id,
-            impact_score=0,
-            summary="分析过程中出现错误，无法生成有效分析",
-            analysis_time=datetime.now(),
-        )
 
     def _save_analysis_result(self, result: AnalysisResult) -> bool:
         """
@@ -626,44 +497,36 @@ class AIAnalyzer:
                     logger.debug(f"完成分析: {news_item.title[:50]}...")
                 except Exception as e:
                     logger.error(f"并行分析失败 [{news_item.title[:50]}...]: {e}")
-                    # 创建错误回退结果
-                    error_result = self._error_fallback_analysis(news_item)
-                    results.append(error_result)
+                    # 跳过失败的新闻，不添加到结果中
+                    continue
         
         logger.info(f"并行分析完成，成功处理 {len(results)} 条新闻")
         return results
 
 
-def analyze_latest_news(limit: int = 20) -> List[AnalysisResult]:
-    """
-    便捷函数：分析最新新闻（并行版本）
-
-    Args:
-        limit: 分析的新闻数量限制
-
-    Returns:
-        List[AnalysisResult]: 分析结果列表
-    """
-    analyzer = AIAnalyzer()
-    news_list = db_manager.get_news_items(limit=limit)
-
-    if not news_list:
-        logger.info("没有找到待分析的新闻")
-        return []
-
-    # 使用并行分析
-    logger.info(f"开始并行分析 {len(news_list)} 条新闻")
-    results = analyzer.analyze_news_batch(news_list)
-    
-    return results
-
-
 if __name__ == "__main__":
     # 测试分析功能
-    results = analyze_latest_news(5)
-    print(f"分析了 {len(results)} 条新闻")
+    import sys
+    
+    # 可以通过命令行参数选择API提供商: python ai_analyzer.py [openrouter|deepseek]
+    provider = sys.argv[1] if len(sys.argv) > 1 else "openrouter"
+    
+    if provider not in ["deepseek", "openrouter"]:
+        print("支持的API提供商: deepseek, openrouter")
+        sys.exit(1)
+    
+    print(f"使用API提供商: {provider}")
+    analyzer = AIAnalyzer(provider=provider)
+    news_list = db_manager.get_news_items(limit=5)
+    
+    if not news_list:
+        print("没有找到待分析的新闻")
+    else:
+        # 使用并行分析
+        print(f"开始分析 {len(news_list)} 条新闻")
+        results = analyzer.analyze_news_batch(news_list)
+        print(f"分析了 {len(results)} 条新闻")
 
-    if results:
-        analyzer = AIAnalyzer()
-        report = analyzer.format_analysis_report(results)
-        print(report)
+        if results:
+            report = analyzer.format_analysis_report(results)
+            print(report)

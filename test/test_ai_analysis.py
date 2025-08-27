@@ -63,7 +63,7 @@ class AIAnalysisTester:
             print(f"🔍 分析测试新闻: {test_news.title[:50]}...")
             
             start_time = time.time()
-            result = self.analyzer.analyze_single_news(test_news)
+            result = self.analyzer.analyze_news(test_news)
             end_time = time.time()
             
             analysis_time = end_time - start_time
@@ -87,40 +87,7 @@ class AIAnalysisTester:
             self.results["single_analysis"] = result
             return result
 
-    def test_mock_analysis(self) -> Dict[str, any]:
-        """测试模拟分析功能（降级逻辑）"""
-        print("\n🎭 测试模拟分析功能")
-        print("-" * 60)
-        
-        try:
-            # 创建测试新闻
-            test_news = self._create_test_news()[0]
-            print(f"🔍 测试模拟分析: {test_news.title[:50]}...")
-            
-            start_time = time.time()
-            result = self.analyzer._mock_analysis(test_news)
-            end_time = time.time()
-            
-            analysis_time = end_time - start_time
-            
-            print(f"✅ 模拟分析完成")
-            print(f"   分析时间: {analysis_time:.2f}秒")
-            print(f"   影响评分: {result.impact_score}/100")
-            print(f"   分析摘要: {result.summary[:50]}...")
-            
-            self.results["mock_analysis"] = {
-                "status": "success",
-                "analysis_time": analysis_time,
-                "impact_score": result.impact_score,
-                "summary": result.summary
-            }
-            return self.results["mock_analysis"]
-            
-        except Exception as e:
-            print(f"❌ 模拟分析失败: {e}")
-            result = {"status": "failed", "error": str(e)}
-            self.results["mock_analysis"] = result
-            return result
+
 
     def _create_test_news(self) -> List[NewsItem]:
         """创建测试新闻数据"""
@@ -172,9 +139,6 @@ class AIAnalysisTester:
         
         # 2. 测试单条分析（基础功能）
         self.test_single_news_analysis()
-        
-        # 3. 测试模拟分析（降级逻辑）
-        self.test_mock_analysis()
         
         # 显示测试总结
         self.print_summary()

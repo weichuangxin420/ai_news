@@ -506,14 +506,44 @@ class EmailSender:
             line-height: 1.4;
             margin: 8px 0 0 0;
         }}
+        .summary-content {{
+            transition: max-height 0.3s ease;
+            overflow: hidden;
+        }}
+        .summary-short {{
+            max-height: 3.6em; /* 约3行文本 */
+        }}
+        .summary-full {{
+            max-height: none;
+        }}
         .news-content {{
             font-size: 11px;
             color: #6c757d;
             margin-top: 5px;
             line-height: 1.3;
-            max-height: 60px;
+        }}
+        .expandable-content {{
+            transition: max-height 0.3s ease;
             overflow: hidden;
-            text-overflow: ellipsis;
+        }}
+        .content-short {{
+            max-height: 60px;
+        }}
+        .content-full {{
+            max-height: none;
+        }}
+        .expand-btn {{
+            background: none;
+            border: none;
+            color: #007acc;
+            cursor: pointer;
+            font-size: 10px;
+            padding: 2px 0;
+            text-decoration: underline;
+            margin-top: 5px;
+        }}
+        .expand-btn:hover {{
+            color: #0056b3;
         }}
         .footer {{
             text-align: center;
@@ -540,6 +570,22 @@ class EmailSender:
             .importance-stats {{ flex-direction: column; }}
         }}
     </style>
+    <script>
+        function toggleContent(element, type) {{
+            const contentDiv = element.previousElementSibling;
+            const isExpanded = contentDiv.classList.contains(type + '-full');
+            
+            if (isExpanded) {{
+                contentDiv.classList.remove(type + '-full');
+                contentDiv.classList.add(type + '-short');
+                element.textContent = '展开';
+            }} else {{
+                contentDiv.classList.remove(type + '-short');
+                contentDiv.classList.add(type + '-full');
+                element.textContent = '收起';
+            }}
+        }}
+    </script>
 </head>
 <body>
     <div class="container">
@@ -620,10 +666,18 @@ class EmailSender:
                     <span class="news-time">{time_str}</span>
                 </div>
                 <div class="news-summary">
-                    <strong>AI分析:</strong> {result.summary}
+                    <strong>AI分析:</strong>
+                    <div class="summary-content summary-{'short' if len(result.summary) > 150 else 'full'}">
+                        {result.summary}
+                    </div>
+                    {'<button class="expand-btn" onclick="toggleContent(this, \'summary\')">展开</button>' if len(result.summary) > 150 else ''}
                 </div>
                 <div class="news-content">
-                    {news_item.content[:200]}{'...' if len(news_item.content) > 200 else ''}
+                    <strong>新闻内容:</strong>
+                    <div class="expandable-content content-{'short' if len(news_item.content) > 200 else 'full'}">
+                        {news_item.content}
+                    </div>
+                    {'<button class="expand-btn" onclick="toggleContent(this, \'content\')">展开</button>' if len(news_item.content) > 200 else ''}
                 </div>
             </div>
 """
@@ -667,7 +721,18 @@ class EmailSender:
                         <span class="news-time">{time_str}</span>
                     </div>
                     <div class="news-summary">
-                        <strong>AI分析:</strong> {result.summary}
+                        <strong>AI分析:</strong>
+                        <div class="summary-content summary-{'short' if len(result.summary) > 150 else 'full'}">
+                            {result.summary}
+                        </div>
+                        {'<button class="expand-btn" onclick="toggleContent(this, \'summary\')">展开</button>' if len(result.summary) > 150 else ''}
+                    </div>
+                    <div class="news-content">
+                        <strong>新闻内容:</strong>
+                        <div class="expandable-content content-{'short' if len(news_item.content) > 200 else 'full'}">
+                            {news_item.content}
+                        </div>
+                        {'<button class="expand-btn" onclick="toggleContent(this, \'content\')">展开</button>' if len(news_item.content) > 200 else ''}
                     </div>
                 </div>
 """

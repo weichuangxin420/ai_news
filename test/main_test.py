@@ -21,6 +21,7 @@ from test_news_collection import run_news_collection_tests
 from test_ai_analysis import run_ai_analysis_tests
 from test_database import run_database_tests
 from test_email import run_all_email_tests
+from test_openrouter_api import TestOpenRouterAPI
 
 # 并发分析功能已集成到主AI分析器中，测试已简化至核心功能
 CONCURRENT_AVAILABLE = False
@@ -80,12 +81,54 @@ class TestRunner:
             return {}
     
     def run_ai_analysis_tests(self) -> Dict[str, dict]:
-        """运行AI分析测试（核心功能）"""
-        print("\n🤖 运行AI分析测试（核心功能）")
+        """运行AI分析测试（核心功能 + OpenRouter）"""
+        print("\n🤖 运行AI分析测试（核心功能 + OpenRouter）")
         print("=" * 80)
         
         try:
+            # 运行原有的AI分析测试
             results = run_ai_analysis_tests()
+            
+            # 运行OpenRouter测试
+            print("\n🔗 运行OpenRouter API测试")
+            print("-" * 40)
+            
+            import unittest
+            import io
+            from contextlib import redirect_stdout, redirect_stderr
+            
+            # 创建测试套件
+            openrouter_test = TestOpenRouterAPI()
+            openrouter_test.setUp()
+            
+            # 运行OpenRouter测试
+            openrouter_results = {
+                "initialization_test": {"status": "pending"},
+                "mock_api_test": {"status": "pending"}, 
+                "real_api_test": {"status": "pending"}
+            }
+            
+            try:
+                openrouter_test.test_openrouter_analyzer_initialization()
+                openrouter_results["initialization_test"]["status"] = "success"
+                print("✅ OpenRouter初始化测试通过")
+            except Exception as e:
+                openrouter_results["initialization_test"]["status"] = "failed"
+                openrouter_results["initialization_test"]["error"] = str(e)
+                print(f"❌ OpenRouter初始化测试失败: {e}")
+            
+            try:
+                openrouter_test.test_real_openrouter_api_call()
+                openrouter_results["real_api_test"]["status"] = "success"
+                print("✅ OpenRouter真实API测试通过")
+            except Exception as e:
+                openrouter_results["real_api_test"]["status"] = "failed"
+                openrouter_results["real_api_test"]["error"] = str(e)
+                print(f"❌ OpenRouter真实API测试失败: {e}")
+            
+            # 合并结果
+            results["openrouter_tests"] = openrouter_results
+            
             self.results["ai_analysis_tests"] = {
                 "status": "completed",
                 "results": results,
@@ -237,7 +280,7 @@ class TestRunner:
             module_display_name = {
                 "api_tests": "API数据源测试",
                 "news_collection_tests": "新闻收集测试",
-                "ai_analysis_tests": "AI分析核心功能测试",
+                "ai_analysis_tests": "AI分析核心功能测试 + OpenRouter",
                 "database_tests": "数据库测试",
                 "email_tests": "邮件功能测试"
             }.get(module_name, module_name)
@@ -311,7 +354,7 @@ def main():
 测试模块说明:
   api         - 测试API数据源连接和数据获取
   collection  - 测试新闻收集功能
-  analysis    - 测试AI分析核心功能（已简化）
+  analysis    - 测试AI分析核心功能 + OpenRouter（已简化）
   database    - 测试数据库操作
   email       - 测试邮件发送功能
   all         - 运行所有测试（默认）
