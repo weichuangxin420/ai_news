@@ -654,6 +654,10 @@ class EmailSender:
                 # 格式化时间
                 time_str = news_item.publish_time.strftime('%m-%d %H:%M') if news_item.publish_time else ''
                 
+                # 预定义按钮HTML，避免f-string中的反斜杠问题
+                summary_button = '<button class="expand-btn" onclick="toggleContent(this, \'summary\')">展开</button>' if len(result.summary) > 150 else ''
+                content_button = '<button class="expand-btn" onclick="toggleContent(this, \'content\')">展开</button>' if len(news_item.content) > 200 else ''
+                
                 html_content += f"""
             <div class="news-item high-impact {impact_class}">
                 <div class="news-header">
@@ -670,14 +674,14 @@ class EmailSender:
                     <div class="summary-content summary-{'short' if len(result.summary) > 150 else 'full'}">
                         {result.summary}
                     </div>
-                    {'<button class="expand-btn" onclick="toggleContent(this, \'summary\')">展开</button>' if len(result.summary) > 150 else ''}
+                    {summary_button}
                 </div>
                 <div class="news-content">
                     <strong>新闻内容:</strong>
                     <div class="expandable-content content-{'short' if len(news_item.content) > 200 else 'full'}">
                         {news_item.content}
                     </div>
-                    {'<button class="expand-btn" onclick="toggleContent(this, \'content\')">展开</button>' if len(news_item.content) > 200 else ''}
+                    {content_button}
                 </div>
             </div>
 """
@@ -709,6 +713,10 @@ class EmailSender:
             # 格式化时间
             time_str = news_item.publish_time.strftime('%m-%d %H:%M') if news_item.publish_time else ''
             
+            # 预定义按钮HTML，避免f-string中的反斜杠问题
+            summary_button = '<button class="expand-btn" onclick="toggleContent(this, \'summary\')">展开</button>' if len(result.summary) > 150 else ''
+            content_button = '<button class="expand-btn" onclick="toggleContent(this, \'content\')">展开</button>' if len(news_item.content) > 200 else ''
+            
             html_content += f"""
                 <div class="news-item {impact_class}">
                     <div class="news-header">
@@ -725,14 +733,14 @@ class EmailSender:
                         <div class="summary-content summary-{'short' if len(result.summary) > 150 else 'full'}">
                             {result.summary}
                         </div>
-                        {'<button class="expand-btn" onclick="toggleContent(this, \'summary\')">展开</button>' if len(result.summary) > 150 else ''}
+                        {summary_button}
                     </div>
                     <div class="news-content">
                         <strong>新闻内容:</strong>
                         <div class="expandable-content content-{'short' if len(news_item.content) > 200 else 'full'}">
                             {news_item.content}
                         </div>
-                        {'<button class="expand-btn" onclick="toggleContent(this, \'content\')">展开</button>' if len(news_item.content) > 200 else ''}
+                        {content_button}
                     </div>
                 </div>
 """

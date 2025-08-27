@@ -358,8 +358,8 @@ if __name__ == '__main__':
     analyzer = ImportanceAnalyzer()
     result = analyzer.analyze_importance(test_news)
     
-    print(f"📰 新闻: {result.title}")
-    print(f"📊 重要程度: {result.importance_score} 分")
-    print(f"🔍 关键因素: {', '.join(result.key_factors)}")
-    print(f"💭 分析推理: {result.reasoning}")
-    print(f"🤖 使用模型: {result.model_used}") 
+    logger.info(f"📰 新闻: {result.title}")
+    logger.info(f"📊 重要程度: {result.importance_score} 分")
+    logger.info(f"🔍 关键因素: {', '.join(result.key_factors)}")
+    logger.info(f"💭 分析推理: {result.reasoning}")
+    logger.info(f"🤖 使用模型: {result.model_used}") 

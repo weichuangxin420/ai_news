@@ -256,11 +256,11 @@ class TaskScheduler:
     def _job_executed_listener(self, event):
         """任务执行事件监听器"""
         with self._lock:
-            self.stats['total_executions'] += 1
-            self.stats['last_execution_time'] = datetime.now().isoformat()
-            
-            if event.exception:
-                self.stats['failed_executions'] += 1
+        self.stats['total_executions'] += 1
+        self.stats['last_execution_time'] = datetime.now().isoformat()
+        
+        if event.exception:
+            self.stats['failed_executions'] += 1
             else:
                 self.stats['successful_executions'] += 1
         
@@ -361,11 +361,11 @@ class TaskScheduler:
         }
         
         with self._lock:
-            self.execution_history.append(event)
-            
-            # 限制历史记录数量
-            if len(self.execution_history) > self.max_history_size:
-                self.execution_history = self.execution_history[-self.max_history_size:]
+        self.execution_history.append(event)
+        
+        # 限制历史记录数量
+        if len(self.execution_history) > self.max_history_size:
+            self.execution_history = self.execution_history[-self.max_history_size:]
         
         logger.debug(f"记录事件: {event_type} - {message}")
     

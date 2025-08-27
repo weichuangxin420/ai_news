@@ -294,7 +294,7 @@ class AIAnalyzer:
                 logger.error(f"   响应头: {getattr(e.response, 'headers', 'N/A')}")
                 try:
                     logger.error(f"   响应内容: {e.response.text[:500]}...")
-                except:
+                except (AttributeError, UnicodeDecodeError):
                     logger.error(f"   无法读取响应内容")
             
             if hasattr(e, 'code'):

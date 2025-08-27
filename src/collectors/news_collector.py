@@ -595,7 +595,7 @@ class NewsCollector:
             from dateutil import parser
 
             return parser.parse(time_str)
-        except:
+        except (ValueError, TypeError, ImportError):
             return datetime.now()
 
     def _generate_simple_tags(self, title: str, content: str) -> List[str]:
@@ -697,7 +697,7 @@ class NewsCollector:
                     publish_time = datetime.fromisoformat(
                         news_data['published_time'].replace('Z', '+00:00')
                     )
-                except Exception:
+                except (ValueError, TypeError):
                     logger.warning(f"时间解析失败: {news_data.get('published_time')}")
                     publish_time = datetime.now()
             else:
