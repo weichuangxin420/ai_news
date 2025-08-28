@@ -74,24 +74,24 @@ class ImportanceAnalyzer:
             return {}
     
     def _init_client(self):
-        """初始化DeepSeek客户端"""
+        """初始化OpenRouter客户端"""
         try:
-            deepseek_config = self.config.get("ai_analysis", {}).get("deepseek", {})
+            openrouter_config = self.config.get("ai_analysis", {}).get("openrouter", {})
             
-            if not deepseek_config.get("api_key"):
-                logger.warning("未配置DeepSeek API密钥，将使用模拟模式")
+            if not openrouter_config.get("api_key"):
+                logger.warning("未配置OpenRouter API密钥，将使用模拟模式")
                 self.client = None
                 return
             
             self.client = OpenAI(
-                api_key=deepseek_config.get("api_key"),
-                base_url=deepseek_config.get("base_url", "https://api.deepseek.com/v1")
+                api_key=openrouter_config.get("api_key"),
+                base_url=openrouter_config.get("base_url", "https://openrouter.ai/api/v1")
             )
             
-            logger.info("DeepSeek思考模型API客户端初始化成功")
+            logger.info("OpenRouter思考模型API客户端初始化成功")
             
         except Exception as e:
-            logger.error(f"初始化DeepSeek客户端失败: {e}")
+            logger.error(f"初始化OpenRouter客户端失败: {e}")
             self.client = None
     
     def analyze_importance(self, news_item: NewsItem) -> ImportanceResult:
@@ -200,10 +200,10 @@ class ImportanceAnalyzer:
     def _call_thinking_model(self, prompt: str) -> str:
         """调用DeepSeek思考模型"""
         try:
-            deepseek_config = self.config.get("ai_analysis", {}).get("deepseek", {})
+            openrouter_config = self.config.get("ai_analysis", {}).get("openrouter", {})
             
-            # 从配置文件获取思考模型型号，默认为deepseek-reasoner
-            thinking_model = deepseek_config.get("model", "deepseek-chat")
+            # 从配置文件获取模型，默认为OpenRouter免费模型
+            thinking_model = openrouter_config.get("model", "deepseek/deepseek-chat-v3.1")
             
             logger.info(f"调用模型: {thinking_model}")
             
@@ -216,8 +216,8 @@ class ImportanceAnalyzer:
                         "content": prompt
                     }
                 ],
-                max_tokens=deepseek_config.get("max_tokens", 2000),
-                temperature=deepseek_config.get("temperature", 0.1)
+                max_tokens=openrouter_config.get("max_tokens", 10000),
+                temperature=openrouter_config.get("temperature", 0.1)
             )
             
             return response.choices[0].message.content

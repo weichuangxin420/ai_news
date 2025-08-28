@@ -148,7 +148,7 @@ scheduler:
     news_collection: 600    # 10分钟
     ai_analysis: 1800      # 30分钟
     email_sending: 300     # 5分钟
-
+  
 # 数据保留配置
 retention:
   max_days: 7                  # 数据保留天数

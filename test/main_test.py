@@ -205,7 +205,7 @@ class TestRunner:
         except Exception as e:
             print(f"❌ 深度分析测试运行失败: {e}")
             self.results["deep_analysis_tests"] = {
-                "status": "failed", 
+                "status": "failed",
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }

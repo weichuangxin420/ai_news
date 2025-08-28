@@ -69,7 +69,8 @@ class AIAnalyzer:
             provider: API提供商，支持 'deepseek' 或 'openrouter'
         """
         self.config = self._load_config(config_path)
-        self.provider = provider
+        # 强制默认使用openrouter，除非明确传入deepseek
+        self.provider = provider if provider in ["openrouter", "deepseek"] else "openrouter"
         
         # 客户端设置
         self.client = None
@@ -216,9 +217,9 @@ class AIAnalyzer:
         # 根据provider获取对应的配置
         if self.provider == "openrouter":
             ai_config = self.config.get("ai_analysis", {}).get("openrouter", {})
-            default_model = "deepseek/deepseek-r1-0528:free"
+            default_model = "deepseek/deepseek-chat-v3.1"
             default_base_url = "https://openrouter.ai/api/v1"
-        else:  # deepseek
+        else:  # deepseek（仅显式传入才使用）
             ai_config = self.config.get("ai_analysis", {}).get("deepseek", {})
             default_model = "deepseek-chat"
             default_base_url = "https://api.deepseek.com/v1"
