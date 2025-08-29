@@ -6,6 +6,7 @@ AI分析模块
 
 import json
 import os
+import random
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -58,7 +59,7 @@ class AnalysisResult:
 
 
 class AIAnalyzer:
-    """AI新闻分析器，支持单条新闻分析"""
+    """AI新闻分析器，支持单条新闻分析和备用模型调用"""
 
     def __init__(self, config_path: str = None, provider: str = "openrouter"):
         """
@@ -74,12 +75,13 @@ class AIAnalyzer:
         
         # 客户端设置
         self.client = None
+        self.fallback_client = None  # 备用客户端
         
         # 初始化客户端
         self._setup_client()
 
         # 统计信息
-        self.stats = {"analyzed": 0, "errors": 0, "api_calls": 0, "total_tokens": 0, "provider": provider}
+        self.stats = {"analyzed": 0, "errors": 0, "api_calls": 0, "total_tokens": 0, "provider": provider, "fallback_used": 0}
 
     def _load_config(self, config_path: Optional[str]) -> dict:
         """加载配置文件"""
@@ -96,7 +98,7 @@ class AIAnalyzer:
             return {}
 
     def _setup_client(self):
-        """设置OpenAI客户端（兼容DeepSeek和OpenRouter API）"""
+        """设置OpenAI客户端（兼容DeepSeek和OpenRouter API）和备用客户端"""
         if self.provider == "openrouter":
             ai_config = self.config.get("ai_analysis", {}).get("openrouter", {})
             provider_name = "OpenRouter"
@@ -137,16 +139,44 @@ class AIAnalyzer:
             )
             logger.info(f"{provider_name} API客户端初始化成功")
             
+            # 初始化备用客户端
+            self._setup_fallback_client(ai_config, extra_headers)
+            
         except Exception as e:
             error_msg = f"{provider_name} API客户端初始化失败: {e}"
             logger.error(error_msg)
             logger.error(f"API密钥长度: {len(api_key) if api_key else 0}")
             logger.error(f"Base URL: {base_url}")
             raise RuntimeError(error_msg)
+    
+    def _setup_fallback_client(self, ai_config: dict, extra_headers: dict):
+        """设置备用客户端"""
+        try:
+            fallback_model = ai_config.get("fallback_model")
+            if not fallback_model:
+                logger.info("未配置备用模型，跳过备用客户端初始化")
+                return
+            
+            # 使用相同的API密钥和基础URL，但使用备用模型
+            base_url = ai_config.get("base_url")
+            api_key = ai_config.get("api_key")
+            
+            logger.info(f"正在初始化备用客户端，模型: {fallback_model}")
+            
+            self.fallback_client = OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                default_headers=extra_headers if extra_headers else None,
+            )
+            logger.info(f"备用客户端初始化成功，模型: {fallback_model}")
+            
+        except Exception as e:
+            logger.warning(f"备用客户端初始化失败: {e}")
+            self.fallback_client = None
 
     def analyze_news(self, news_item: NewsItem) -> AnalysisResult:
         """
-        分析单条新闻
+        分析单条新闻（支持失败重试）
 
         Args:
             news_item: 新闻项
@@ -161,12 +191,72 @@ class AIAnalyzer:
         # 构建提示词
         prompt = self._build_analysis_prompt(news_item)
 
-        # 调用AI API进行分析
-        response = self._call_ai_api(prompt)
-        result = self._parse_analysis_response(news_item.id, response)
-        self.stats["analyzed"] += 1
-        logger.debug(f"新闻分析完成: {news_item.title[:50]}...")
-        return result
+        # 调用AI API进行分析（支持重试）
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = self._call_ai_api(prompt)
+                result = self._parse_analysis_response(news_item.id, response)
+                self.stats["analyzed"] += 1
+                logger.debug(f"新闻分析完成: {news_item.title[:50]}...")
+                return result
+                
+            except Exception as e:
+                # 检查是否是HTTP错误（状态码不是200）
+                is_http_error = False
+                status_code = None
+                
+                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                    status_code = e.response.status_code
+                    is_http_error = status_code != 200
+                
+                if is_http_error:
+                    logger.error(f"❌ 第{attempt + 1}次尝试失败 - HTTP状态码: {status_code}")
+                    logger.error(f"   错误信息: {str(e)}")
+                    
+                    if attempt < max_retries - 1:  # 不是最后一次尝试
+                        # 计算等待时间：第1次1-30秒，第2次30-60秒，第3次60-90秒
+                        if attempt == 0:
+                            wait_time = random.randint(1, 30)
+                        elif attempt == 1:
+                            wait_time = random.randint(30, 60)
+                        else:
+                            wait_time = random.randint(60, 90)
+                        
+                        logger.info(f"⏳ 等待 {wait_time} 秒后进行第 {attempt + 2} 次重试...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        # 最后一次尝试失败，尝试使用备用客户端
+                        if self.fallback_client:
+                            logger.warning(f"🔄 主客户端三次重试均失败，尝试使用备用客户端...")
+                            try:
+                                response = self._call_ai_api_with_fallback(prompt)
+                                result = self._parse_analysis_response(news_item.id, response)
+                                self.stats["analyzed"] += 1
+                                self.stats["fallback_used"] += 1
+                                logger.info(f"✅ 备用客户端调用成功！")
+                                logger.debug(f"新闻分析完成: {news_item.title[:50]}...")
+                                return result
+                            except Exception as fallback_error:
+                                logger.error(f"❌ 备用客户端也失败，最终失败原因:")
+                                if status_code is not None:
+                                    logger.error(f"   主客户端HTTP状态码: {status_code}")
+                                logger.error(f"   主客户端错误: {str(e)}")
+                                logger.error(f"   备用客户端错误: {str(fallback_error)}")
+                                raise RuntimeError(f"主客户端和备用客户端均失败: 主客户端({str(e)})，备用客户端({str(fallback_error)})")
+                        else:
+                            # 没有备用客户端，记录详细错误并抛出异常
+                            logger.error(f"❌ 所有重试尝试均失败，且无备用客户端，最终失败原因:")
+                            if status_code is not None:
+                                logger.error(f"   HTTP状态码: {status_code}")
+                            logger.error(f"   错误类型: {type(e).__name__}")
+                            logger.error(f"   错误信息: {str(e)}")
+                            raise
+                else:
+                    # 非HTTP错误，直接抛出异常
+                    logger.error(f"❌ 非HTTP错误，不进行重试: {str(e)}")
+                    raise
 
 
 
@@ -242,7 +332,6 @@ class AIAnalyzer:
         logger.info(f"   提示词长度: {len(prompt)} 字符")
 
         try:
-            import time
             start_time = time.time()
             
             logger.info(f"📤 开始API请求...")
@@ -285,6 +374,102 @@ class AIAnalyzer:
             response_time = end_time - start_time
             
             logger.error(f"❌ {self.provider.upper()} API调用失败")
+            logger.error(f"   错误类型: {type(e).__name__}")
+            logger.error(f"   错误信息: {str(e)}")
+            logger.error(f"   失败时间: {response_time:.2f}秒")
+            
+            # 记录更详细的错误信息
+            if hasattr(e, 'response'):
+                logger.error(f"   HTTP状态码: {getattr(e.response, 'status_code', 'N/A')}")
+                logger.error(f"   响应头: {getattr(e.response, 'headers', 'N/A')}")
+                try:
+                    logger.error(f"   响应内容: {e.response.text[:500]}...")
+                except (AttributeError, UnicodeDecodeError):
+                    logger.error(f"   无法读取响应内容")
+            
+            if hasattr(e, 'code'):
+                logger.error(f"   错误代码: {e.code}")
+                
+            raise
+    
+    def _call_ai_api_with_fallback(self, prompt: str) -> str:
+        """
+        使用备用客户端调用AI API
+
+        Args:
+            prompt: 提示词
+
+        Returns:
+            str: API响应内容
+        """
+        if not self.fallback_client:
+            raise RuntimeError("备用客户端未初始化")
+        
+        # 根据provider获取对应的备用配置
+        if self.provider == "openrouter":
+            ai_config = self.config.get("ai_analysis", {}).get("openrouter", {})
+            fallback_model = ai_config.get("fallback_model", "deepseek/deepseek-chat-v3.1")
+        else:  # deepseek
+            ai_config = self.config.get("ai_analysis", {}).get("deepseek", {})
+            fallback_model = ai_config.get("fallback_model", "deepseek-chat")
+        
+        analysis_params = self.config.get("ai_analysis", {}).get("analysis_params", {})
+
+        # 记录备用API请求详情
+        max_tokens = ai_config.get("max_tokens", 10000)
+        temperature = ai_config.get("temperature", 0.1)
+        timeout = analysis_params.get("fallback_timeout", 600)  # 使用备用超时时间
+        
+        logger.info(f"🔄 使用备用客户端调用API")
+        logger.info(f"   备用模型: {fallback_model}")
+        logger.info(f"   最大令牌: {max_tokens}")
+        logger.info(f"   温度: {temperature}")
+        logger.info(f"   超时: {timeout}秒")
+        logger.info(f"   提示词长度: {len(prompt)} 字符")
+
+        try:
+            start_time = time.time()
+            
+            logger.info(f"📤 开始备用API请求...")
+            
+            response = self.fallback_client.chat.completions.create(
+                model=fallback_model,
+                messages=[
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                timeout=timeout,
+            )
+
+            end_time = time.time()
+            response_time = end_time - start_time
+            
+            logger.info(f"📥 备用API响应成功")
+            logger.info(f"   响应时间: {response_time:.2f}秒")
+
+            self.stats["api_calls"] += 1
+            if hasattr(response, "usage") and response.usage:
+                self.stats["total_tokens"] += response.usage.total_tokens
+                logger.info(f"   使用令牌: {response.usage.total_tokens}")
+                logger.info(f"   输入令牌: {response.usage.prompt_tokens}")
+                logger.info(f"   输出令牌: {response.usage.completion_tokens}")
+
+            response_content = response.choices[0].message.content
+            logger.info(f"   响应内容长度: {len(response_content)} 字符")
+            logger.debug(f"   响应内容预览: {response_content[:200]}...")
+            
+            # 记录完整响应内容用于调试
+            logger.info(f"📄 完整备用API响应内容:")
+            logger.info(f"   {response_content}")
+
+            return response_content
+
+        except Exception as e:
+            end_time = time.time()
+            response_time = end_time - start_time
+            
+            logger.error(f"❌ 备用API调用失败")
             logger.error(f"   错误类型: {type(e).__name__}")
             logger.error(f"   错误信息: {str(e)}")
             logger.error(f"   失败时间: {response_time:.2f}秒")

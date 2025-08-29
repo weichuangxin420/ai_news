@@ -79,8 +79,7 @@ class DeepAnalyzer:
         self.enable_score_adjustment = self.deep_config.get("enable_score_adjustment", True)
         self.search_retry_count = self.deep_config.get("search_retry_count", 2)
         
-        # AI自驱动检索配置 (内置默认值，暂不修改配置文件)
-        self.ai_self_search_enabled = self.deep_config.get("ai_self_search_enabled", True)
+        # AI自驱动检索配置
         self.max_search_rounds = self.deep_config.get("max_search_rounds", 3)
         self.evidence_threshold = self.deep_config.get("evidence_threshold", 2)  # 至少需要的有效证据数
         self.max_evidence_kept = self.deep_config.get("max_evidence_kept", 5)   # 保留的最大证据数
@@ -104,9 +103,9 @@ class DeepAnalyzer:
             openrouter_config = self.config.get("ai_analysis", {}).get("openrouter", {})
             
             if not openrouter_config.get("api_key"):
-                logger.warning("未配置OpenRouter API密钥，深度分析将使用模拟模式")
-                self.client = None
-                return
+                error_msg = "未配置OpenRouter API密钥，深度分析无法正常工作"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
             self.client = OpenAI(
                 api_key=openrouter_config.get("api_key"),
@@ -116,8 +115,9 @@ class DeepAnalyzer:
             logger.info("OpenRouter深度分析API客户端初始化成功")
             
         except Exception as e:
-            logger.error(f"初始化OpenRouter客户端失败: {e}")
-            self.client = None
+            error_msg = f"初始化OpenRouter客户端失败: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
     
     def should_analyze(self, news_item: NewsItem) -> bool:
         """
@@ -154,13 +154,12 @@ class DeepAnalyzer:
         try:
             logger.info(f"开始深度分析: {news_item.title[:50]}...")
             
-            # 选择分析模式：AI自驱动检索 vs 传统关键词检索
-            if self.ai_self_search_enabled and self.client is not None:
+            # 使用AI自驱动检索模式进行深度分析
+            if self.client is not None:
                 logger.info("使用AI自驱动检索模式进行深度分析")
                 return self._analyze_with_ai_self_search(news_item)
             else:
-                logger.info("使用传统关键词检索模式进行深度分析")
-                return self._analyze_with_keyword_search(news_item)
+                raise RuntimeError("OpenRouter客户端未初始化，无法进行深度分析")
                 
         except Exception as e:
             logger.error(f"深度分析失败: {e}")
@@ -238,51 +237,9 @@ class DeepAnalyzer:
             
         except Exception as e:
             logger.error(f"AI自驱动深度分析失败: {e}")
-            # 降级到传统模式
-            logger.info("降级到传统关键词检索模式")
-            return self._analyze_with_keyword_search(news_item)
+            raise RuntimeError(f"AI自驱动深度分析失败: {e}")
     
-    def _analyze_with_keyword_search(self, news_item: NewsItem) -> DeepAnalysisResult:
-        """
-        使用传统关键词检索模式进行深度分析（保持向后兼容）
-        
-        Args:
-            news_item: 新闻项
-            
-        Returns:
-            DeepAnalysisResult: 深度分析结果
-        """
-        # 1. 提取搜索关键词
-        keywords = self._extract_search_keywords(news_item)
-        
-        # 2. 执行百度搜索
-        search_results, search_success = self._perform_search(keywords, news_item.title)
-        
-        # 3. 生成深度分析报告
-        deep_report = self._generate_deep_analysis(news_item, search_results, keywords)
-        
-        # 4. 重新评估重要性分数
-        adjusted_score = self._adjust_importance_score(
-            news_item, deep_report, search_results
-        ) if self.enable_score_adjustment else news_item.importance_score
-        
-        result = DeepAnalysisResult(
-            news_id=news_item.id or f"deep_{int(time.time())}",
-            title=news_item.title,
-            original_score=news_item.importance_score,
-            search_keywords=keywords,
-            search_results_summary=search_results,
-            deep_analysis_report=deep_report,
-            adjusted_score=adjusted_score,
-            analysis_time=datetime.now().isoformat(),
-            search_success=search_success,
-            model_used=self.config.get("ai_analysis", {}).get("openrouter", {}).get("model", "deepseek/deepseek-chat-v3.1")
-        )
-        
-        logger.info(f"传统深度分析完成: {news_item.title[:50]}... -> {adjusted_score}分 (原{news_item.importance_score}分)")
-        logger.info("深度分析报告全文:")
-        logger.info(deep_report)
-        return result
+
     
     def batch_analyze_deep(self, news_list: List[NewsItem]) -> List[DeepAnalysisResult]:
         """
@@ -420,81 +377,7 @@ class DeepAnalyzer:
             logger.error(f"解析搜索查询失败: {e}")
             return []
     
-    def _extract_search_keywords(self, news_item: NewsItem) -> List[str]:
-        """
-        从新闻中提取搜索关键词
-        
-        Args:
-            news_item: 新闻项
-            
-        Returns:
-            List[str]: 搜索关键词列表
-        """
-        try:
-            # 使用简单的关键词提取策略
-            title = news_item.title
-            content = news_item.content
-            
-            keywords = []
-            
-            # 从标题中提取关键词
-            title_keywords = self._extract_keywords_from_text(title)
-            keywords.extend(title_keywords[:3])  # 取前3个
-            
-            # 从内容中提取关键词
-            if content and len(keywords) < self.max_keywords:
-                content_keywords = self._extract_keywords_from_text(content)
-                remaining_slots = self.max_keywords - len(keywords)
-                keywords.extend(content_keywords[:remaining_slots])
-            
-            # 如果关键词不足，使用标题作为搜索词
-            if not keywords:
-                keywords = [title[:20]]  # 使用标题前20字符
-            
-            logger.debug(f"提取搜索关键词: {keywords}")
-            return keywords[:self.max_keywords]
-            
-        except Exception as e:
-            logger.error(f"提取搜索关键词失败: {e}")
-            return [news_item.title[:20]]  # 降级方案
-    
-    def _extract_keywords_from_text(self, text: str) -> List[str]:
-        """
-        从文本中提取关键词
-        
-        Args:
-            text: 输入文本
-            
-        Returns:
-            List[str]: 关键词列表
-        """
-        if not text:
-            return []
-        
-        # 简单的关键词提取：查找常见的财经关键词
-        financial_keywords = [
-            "股票", "股市", "上市", "IPO", "融资", "投资", "基金", "证券",
-            "银行", "保险", "地产", "科技", "医药", "能源", "汽车", "消费",
-            "制造", "金融", "互联网", "人工智能", "新能源", "半导体",
-            "涨停", "跌停", "涨幅", "跌幅", "成交", "市值", "业绩", "财报"
-        ]
-        
-        # 查找匹配的关键词
-        found_keywords = []
-        for keyword in financial_keywords:
-            if keyword in text and keyword not in found_keywords:
-                found_keywords.append(keyword)
-                if len(found_keywords) >= 5:  # 最多提取5个
-                    break
-        
-        # 如果没有找到财经关键词，提取其他关键词
-        if not found_keywords:
-            # 简单分词：提取3-8字符的词组
-            import re
-            words = re.findall(r'[\u4e00-\u9fff]{3,8}', text)
-            found_keywords = list(set(words))[:3]
-        
-        return found_keywords
+
     
     def _perform_single_search(self, query: str) -> Tuple[str, bool]:
         """
@@ -699,9 +582,6 @@ class DeepAnalyzer:
         Returns:
             str: 深度分析报告
         """
-        if self.client is None:
-            return self._generate_mock_analysis(news_item, evidence_summary.get('summary', ''), [])
-        
         try:
             prompt = self._build_evidence_based_analysis_prompt(news_item, evidence_summary)
             response = self._call_ai_model(prompt)
@@ -717,7 +597,7 @@ class DeepAnalyzer:
             
         except Exception as e:
             logger.error(f"生成证据基于深度分析报告失败: {e}")
-            return self._generate_mock_analysis(news_item, evidence_summary.get('summary', ''), [])
+            raise RuntimeError(f"生成证据基于深度分析报告失败: {e}")
     
     def _build_evidence_based_analysis_prompt(self, news_item: NewsItem, evidence_summary: Dict) -> str:
         """构建基于证据生成深度分析的prompt"""
@@ -749,101 +629,9 @@ class DeepAnalyzer:
 
         return prompt
     
-    def _perform_search(self, keywords: List[str], title: str) -> Tuple[str, bool]:
-        """
-        执行百度搜索（保持向后兼容的方法）
-        
-        Args:
-            keywords: 搜索关键词列表
-            title: 新闻标题（作为备用搜索词）
-            
-        Returns:
-            Tuple[str, bool]: (搜索结果摘要, 搜索是否成功)
-        """
-        try:
-            # 组合关键词进行搜索
-            search_query = " ".join(keywords[:3])  # 使用前3个关键词
-            
-            if not search_query.strip():
-                search_query = title[:30]  # 使用标题前30字符作为备用
-            
-            logger.info(f"执行百度搜索: {search_query}")
-            
-            # 调用百度搜索工具
-            search_result = baidu_search_tool(search_query, max_results=5)
-            
-            if search_result and "搜索失败" not in search_result:
-                logger.info(f"搜索成功: {search_query}")
-                return search_result, True
-            else:
-                logger.warning(f"搜索失败: {search_query}")
-                return f"搜索关键词'{search_query}'未获取到有效结果", False
-                
-        except Exception as e:
-            logger.error(f"执行搜索时出错: {e}")
-            return f"搜索过程中出现错误: {str(e)}", False
+
     
-    def _generate_deep_analysis(self, news_item: NewsItem, search_results: str, keywords: List[str]) -> str:
-        """
-        生成深度分析报告（保持向后兼容的方法）
-        
-        Args:
-            news_item: 新闻项
-            search_results: 搜索结果
-            keywords: 搜索关键词
-            
-        Returns:
-            str: 深度分析报告
-        """
-        if self.client is None:
-            return self._generate_mock_analysis(news_item, search_results, keywords)
-        
-        try:
-            prompt = self._build_deep_analysis_prompt(news_item, search_results, keywords)
-            response = self._call_ai_model(prompt)
-            
-            # 解析和清理分析结果
-            analysis = self._parse_analysis_response(response)
-            
-            # 确保长度限制
-            if len(analysis) > self.report_max_length:
-                analysis = analysis[:self.report_max_length-3] + "..."
-            
-            return analysis
-            
-        except Exception as e:
-            logger.error(f"生成深度分析报告失败: {e}")
-            return self._generate_mock_analysis(news_item, search_results, keywords)
-    
-    def _build_deep_analysis_prompt(self, news_item: NewsItem, search_results: str, keywords: List[str]) -> str:
-        """构建深度分析的prompt（保持向后兼容的方法）"""
-        
-        prompt = f"""作为专业的财经分析师，请对以下新闻进行深度分析。
 
-原始新闻：
-标题：{news_item.title}
-内容：{news_item.content}
-来源：{news_item.source}
-重要性分数：{news_item.importance_score}分
-
-相关背景信息（通过搜索关键词"{', '.join(keywords)}"获取）：
-{search_results}
-
-请基于原始新闻和背景信息，生成一份200字以内的深度分析报告，重点分析：
-1. 新闻的深层影响和意义
-2. 对相关行业或市场的潜在影响
-3. 可能的发展趋势
-4. 投资者需要关注的要点
-
-要求：
-- 专业、客观、准确
-- 控制在200字以内
-- 重点突出，条理清晰
-- 结合背景信息提供更深层次的洞察
-
-深度分析报告："""
-
-        return prompt
     
     def _call_ai_model(self, prompt: str) -> str:
         """调用AI模型进行分析"""
@@ -888,71 +676,9 @@ class DeepAnalyzer:
             logger.error(f"解析分析响应失败: {e}")
             return response  # 返回原始响应
     
-    def _adjust_importance_score(self, news_item: NewsItem, deep_analysis: str, search_results: str) -> int:
-        """
-        根据深度分析调整重要性分数
-        
-        Args:
-            news_item: 新闻项
-            deep_analysis: 深度分析报告
-            search_results: 搜索结果
-            
-        Returns:
-            int: 调整后的重要性分数
-        """
-        try:
-            original_score = news_item.importance_score
-            
-            # 简单的分数调整逻辑
-            adjustment = 0
-            
-            # 基于深度分析内容的关键词调整
-            high_impact_keywords = ["重大", "突破", "重要", "关键", "显著", "大幅", "急剧"]
-            medium_impact_keywords = ["一定", "可能", "预期", "有望", "影响"]
-            
-            analysis_text = deep_analysis.lower()
-            
-            for keyword in high_impact_keywords:
-                if keyword in analysis_text:
-                    adjustment += 2
-            
-            for keyword in medium_impact_keywords:
-                if keyword in analysis_text:
-                    adjustment += 1
-            
-            # 基于搜索结果成功与否调整
-            if "搜索成功" in search_results or len(search_results) > 100:
-                adjustment += 3  # 搜索结果丰富，增加可信度
-            
-            # 计算最终分数
-            adjusted_score = min(100, max(0, original_score + adjustment))
-            
-            logger.debug(f"分数调整: {original_score} -> {adjusted_score} (调整值: +{adjustment})")
-            return adjusted_score
-            
-        except Exception as e:
-            logger.error(f"调整重要性分数失败: {e}")
-            return news_item.importance_score  # 返回原始分数
+
     
-    def _generate_mock_analysis(self, news_item: NewsItem, search_results: str, keywords: List[str]) -> str:
-        """生成模拟深度分析报告"""
-        
-        has_search_results = search_results and "搜索失败" not in search_results
-        
-        analysis = f"基于新闻'{news_item.title}'的深度分析：该新闻涉及{', '.join(keywords[:2])}等关键领域。"
-        
-        if has_search_results:
-            analysis += "结合相关背景信息，此事件可能对相关行业产生一定影响。"
-        else:
-            analysis += "由于背景信息有限，建议持续关注后续发展。"
-        
-        analysis += "投资者应关注相关政策动向和市场反应，谨慎评估投资风险。"
-        
-        # 确保长度限制
-        if len(analysis) > self.report_max_length:
-            analysis = analysis[:self.report_max_length-3] + "..."
-        
-        return analysis
+
     
     def _create_skip_result(self, news_item: NewsItem) -> DeepAnalysisResult:
         """创建跳过分析的结果"""

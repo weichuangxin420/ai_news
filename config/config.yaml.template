@@ -42,7 +42,8 @@ ai_analysis:
   openrouter:
     api_key: "YOUR_OPENROUTER_API_KEY"  # 请替换为你的OpenRouter API密钥
     base_url: "https://openrouter.ai/api/v1"
-    model: "deepseek/deepseek-r1-0528:free"  # 使用免费的deepseek-r1模型
+    model: "deepseek/deepseek-chat-v3.1:free"  # 默认模型
+    fallback_model: "deepseek/deepseek-chat-v3.1"
     max_tokens: 10000
     temperature: 0.1
   
