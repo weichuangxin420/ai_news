@@ -1004,16 +1004,42 @@ class TaskScheduler:
             logger.info("开始深度分析高重要性新闻...")
             if not self.deep_analyzer:
                 self.deep_analyzer = DeepAnalyzer()
+                logger.info("深度分析器初始化完成")
             
-            deep_analysis_results = self.deep_analyzer.batch_analyze_deep(news_list)
+            # 统计需要深度分析的新闻数量
+            high_importance_count = sum(1 for news in news_list if hasattr(news, 'importance_score') and news.importance_score >= 70)
+            logger.info(f"发现 {high_importance_count} 条高重要性新闻（分数>=70），准备进行深度分析")
             
-            # 将深度分析结果应用到对应的新闻项
-            deep_analysis_dict = {result.news_id: result for result in deep_analysis_results}
-            for news_item in news_list:
-                if news_item.id in deep_analysis_dict:
-                    deep_result = deep_analysis_dict[news_item.id]
-                    news_item.update_with_deep_analysis(deep_result)
-                    logger.debug(f"应用深度分析结果: {news_item.title[:30]}... -> {deep_result.adjusted_score}分")
+            if high_importance_count > 0:
+                logger.info(f"开始批量深度分析，共 {high_importance_count} 条新闻")
+                deep_analysis_results = self.deep_analyzer.batch_analyze_deep(news_list)
+                logger.info(f"深度分析完成，共处理 {len(deep_analysis_results)} 条新闻")
+                
+                # 将深度分析结果应用到对应的新闻项
+                deep_analysis_dict = {result.news_id: result for result in deep_analysis_results}
+                applied_count = 0
+                for news_item in news_list:
+                    if news_item.id in deep_analysis_dict:
+                        deep_result = deep_analysis_dict[news_item.id]
+                        news_item.update_with_deep_analysis(deep_result)
+                        applied_count += 1
+                        logger.debug(f"应用深度分析结果: {news_item.title[:30]}... -> {deep_result.adjusted_score}分 (原{deep_result.original_score}分)")
+                
+                logger.info(f"成功应用深度分析结果到 {applied_count} 条新闻")
+                
+                # 统计分数调整情况
+                score_adjustments = []
+                for result in deep_analysis_results:
+                    if result.adjusted_score != result.original_score:
+                        score_adjustments.append(f"{result.title[:20]}...: {result.original_score}→{result.adjusted_score}")
+                
+                if score_adjustments:
+                    logger.info(f"深度分析分数调整详情: {'; '.join(score_adjustments)}")
+                else:
+                    logger.info("深度分析未对任何新闻的分数进行调整")
+            else:
+                logger.info("没有新闻需要深度分析（所有新闻重要性分数均<70）")
+                deep_analysis_results = []
 
             # 4. AI分析以获取影响程度
             logger.info("开始AI影响分析...")
@@ -1050,9 +1076,14 @@ class TaskScheduler:
             logger.info("=== 执行早上8点收集任务 ===")
             
             # 收集和分析新闻
+            logger.info("开始执行完整的新闻收集与分析流程（包含深度分析）")
             news_list = self.collect_and_analyze_news()
             
             if news_list:
+                # 统计深度分析结果
+                deep_analyzed_count = sum(1 for news in news_list if hasattr(news, 'deep_analysis_report') and news.deep_analysis_report)
+                logger.info(f"早间收集完成: 共 {len(news_list)} 条新闻，其中 {deep_analyzed_count} 条已完成深度分析")
+                
                 # 过滤分数低于50的新闻
                 filtered_news = self._filter_news_by_score(news_list, 50)
                 
@@ -1062,6 +1093,8 @@ class TaskScheduler:
                     logger.info(f"早间新闻报告发送完成，包含 {len(filtered_news)} 条新闻（原始 {len(news_list)} 条）")
                 else:
                     logger.info(f"早间收集到 {len(news_list)} 条新闻，但没有分数达到50分的重要新闻，跳过邮件发送")
+            else:
+                logger.info("早间收集任务完成，未收集到新新闻")
                 
         except Exception as e:
             logger.error(f"早上8点任务执行失败: {e}")
@@ -1077,9 +1110,14 @@ class TaskScheduler:
                 logger.info("=== 执行交易时间收集任务 ===")
                 
                 # 收集和分析新闻，所有新闻都存入数据库
+                logger.info("开始执行完整的新闻收集与分析流程（包含深度分析）")
                 news_list = self.collect_and_analyze_news()
                 
                 if news_list:
+                    # 统计深度分析结果
+                    deep_analyzed_count = sum(1 for news in news_list if hasattr(news, 'deep_analysis_report') and news.deep_analysis_report)
+                    logger.info(f"交易时间收集完成: 共 {len(news_list)} 条新闻，其中 {deep_analyzed_count} 条已完成深度分析")
+                    
                     # 对于交易时间收集的新闻，只有分数>=70的才发送即时邮件
                     high_priority_news = self._filter_news_by_score(news_list, 70)
                     
@@ -1089,6 +1127,8 @@ class TaskScheduler:
                         logger.info(f"交易时间收集到 {len(news_list)} 条新闻，发送 {len(high_priority_news)} 条高优先级新闻邮件")
                     else:
                         logger.info(f"交易时间收集到 {len(news_list)} 条新闻，但无分数达到70分的重要新闻，已存入数据库，等待晚上汇总")
+                else:
+                    logger.info("交易时间收集任务完成，未收集到新新闻")
             else:
                 logger.debug("当前不在交易时间，跳过收集")
                 
@@ -1102,10 +1142,15 @@ class TaskScheduler:
             logger.info("=== 执行晚上10点收集任务 ===")
             
             # 收集和分析新闻
+            logger.info("开始执行完整的新闻收集与分析流程（包含深度分析）")
             news_list = self.collect_and_analyze_news()
             
             if news_list:
-                logger.info(f"晚上10点收集到 {len(news_list)} 条新闻，已保存但不发送邮件")
+                # 统计深度分析结果
+                deep_analyzed_count = sum(1 for news in news_list if hasattr(news, 'deep_analysis_report') and news.deep_analysis_report)
+                logger.info(f"晚间收集完成: 共 {len(news_list)} 条新闻，其中 {deep_analyzed_count} 条已完成深度分析，已保存但不发送邮件")
+            else:
+                logger.info("晚间收集任务完成，未收集到新新闻")
                 
         except Exception as e:
             logger.error(f"晚上10点任务执行失败: {e}")
@@ -1123,6 +1168,12 @@ class TaskScheduler:
             if not today_news:
                 logger.info("今天没有新闻，跳过汇总邮件")
                 return
+            
+            # 统计深度分析情况
+            deep_analyzed_count = sum(1 for news in today_news if hasattr(news, 'deep_analysis_report') and news.deep_analysis_report)
+            high_importance_count = sum(1 for news in today_news if hasattr(news, 'importance_score') and news.importance_score >= 70)
+            
+            logger.info(f"每日汇总统计: 共 {len(today_news)} 条新闻，其中 {high_importance_count} 条高重要性新闻，{deep_analyzed_count} 条已完成深度分析")
             
             # 按重要性排序
             sorted_news = sorted(today_news, key=lambda x: x.importance_score, reverse=True)
@@ -1455,10 +1506,18 @@ class TaskScheduler:
             config_status = {
                 'news_sources': len(self.config.get('news_collection', {}).get('sources', {}).get('rss_feeds', [])) > 0,
                 'email_configured': bool(self.config.get('email', {}).get('smtp', {}).get('username')),
+                'deep_analysis_enabled': self.config.get('ai_analysis', {}).get('deep_analysis', {}).get('enabled', True),
+                'deep_analysis_threshold': self.config.get('ai_analysis', {}).get('deep_analysis', {}).get('score_threshold', 70)
             }
+            
+            # 深度分析器状态详情
+            deep_analyzer_status = "未初始化"
+            if self.deep_analyzer:
+                deep_analyzer_status = f"已初始化 (阈值: {getattr(self.deep_analyzer, 'score_threshold', 'N/A')}, 启用: {getattr(self.deep_analyzer, 'enabled', 'N/A')})"
             
             logger.info(f"组件状态: {components_status}")
             logger.info(f"配置状态: {config_status}")
+            logger.info(f"深度分析器状态: {deep_analyzer_status}")
             
             return all(components_status.values()) and all(config_status.values())
             
@@ -1471,7 +1530,7 @@ class TaskScheduler:
              enable_analysis: bool = True,
              enable_email: bool = True,
              enable_full_pipeline: bool = False,
-             enable_enhanced_strategy: bool = False,
+             enable_enhanced_strategy: bool = True,  # 默认启用增强版策略
              enable_maintenance: bool = True,
              enable_monitoring: bool = True):
         """
@@ -1657,11 +1716,28 @@ class TaskScheduler:
             return
         
         logger.info("=== 活动任务列表 ===")
+
+        
+        # 统计任务类型
+        task_types = {}
+        for job in self.scheduler.get_jobs():
+            task_types[job.name] = task_types.get(job.name, 0) + 1
+        
+        # 显示深度分析相关任务
+        deep_analysis_tasks = [name for name in task_types.keys() if '收集' in name or '汇总' in name]
+        if deep_analysis_tasks:
+            logger.info(f"深度分析相关任务: {', '.join(deep_analysis_tasks)}")
+        
         for job in self.scheduler.get_jobs():
             next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job.next_run_time else "未知"
             logger.info(f"任务: {job.name} (ID: {job.id})")
             logger.info(f"  下次执行: {next_run}")
             logger.info(f"  触发器: {job.trigger}")
+            
+            # 为深度分析相关任务添加额外信息
+            if '收集' in job.name or '汇总' in job.name:
+                logger.info(f"  功能: 包含新闻收集、重要性分析、深度分析、AI影响分析")
+            
             logger.info("")
 
     def _update_next_execution_time(self):

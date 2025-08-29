@@ -546,13 +546,7 @@ class EmailSender:
             margin: 8px 0 0 0;
         }}
         .summary-content {{
-            transition: max-height 0.3s ease;
-            overflow: hidden;
-        }}
-        .summary-short {{
-            max-height: 3.6em; /* 约3行文本 */
-        }}
-        .summary-full {{
+            /* 移除省略逻辑，确保完整显示 */
             max-height: none;
         }}
         .news-content {{
@@ -561,28 +555,9 @@ class EmailSender:
             margin-top: 5px;
             line-height: 1.3;
         }}
-        .expandable-content {{
-            transition: max-height 0.3s ease;
-            overflow: hidden;
-        }}
-        .content-short {{
-            max-height: 60px;
-        }}
-        .content-full {{
-            max-height: none;
-        }}
+        /* 移除expandable-content类，统一使用news-content */
         .expand-btn {{
-            background: none;
-            border: none;
-            color: #007acc;
-            cursor: pointer;
-            font-size: 10px;
-            padding: 2px 0;
-            text-decoration: underline;
-            margin-top: 5px;
-        }}
-        .expand-btn:hover {{
-            color: #0056b3;
+            display: none; /* 隐藏展开按钮 */
         }}
         .footer {{
             text-align: center;
@@ -610,20 +585,7 @@ class EmailSender:
         }}
     </style>
     <script>
-        function toggleContent(element, type) {{
-            const contentDiv = element.previousElementSibling;
-            const isExpanded = contentDiv.classList.contains(type + '-full');
-            
-            if (isExpanded) {{
-                contentDiv.classList.remove(type + '-full');
-                contentDiv.classList.add(type + '-short');
-                element.textContent = '展开';
-            }} else {{
-                contentDiv.classList.remove(type + '-short');
-                contentDiv.classList.add(type + '-full');
-                element.textContent = '收起';
-            }}
-        }}
+        /* 移除展开/收起功能，因为所有内容都完整显示 */
     </script>
 </head>
 <body>
@@ -698,9 +660,7 @@ class EmailSender:
                 # 格式化时间
                 time_str = news_item.publish_time.strftime('%m-%d %H:%M') if news_item.publish_time else ''
                 
-                # 预定义按钮HTML，避免f-string中的反斜杠问题
-                summary_button = '<button class="expand-btn" onclick="toggleContent(this, \'summary\')">展开</button>' if len(result.summary) > 150 else ''
-                content_button = '<button class="expand-btn" onclick="toggleContent(this, \'content\')">展开</button>' if len(news_item.content) > 200 else ''
+                # 移除展开按钮，确保内容完整显示
                 
                 html_content += f"""
             <div class="news-item high-impact {impact_class}">
@@ -719,10 +679,9 @@ class EmailSender:
                 </div>
                 <div class="news-summary">
                     <strong>AI分析:</strong>
-                    <div class="summary-content summary-{'short' if len(result.summary) > 150 else 'full'}">
+                    <div class="summary-content">
                         {result.summary}
                     </div>
-                    {summary_button}
                 </div>
                 {f'''
                 <div class="deep-analysis">
@@ -733,10 +692,9 @@ class EmailSender:
                 ''' if has_deep_analysis else ''}
                 <div class="news-content">
                     <strong>新闻内容:</strong>
-                    <div class="expandable-content content-{'short' if len(news_item.content) > 200 else 'full'}">
+                    <div class="news-content">
                         {news_item.content}
                     </div>
-                    {content_button}
                 </div>
             </div>
 """
@@ -773,9 +731,7 @@ class EmailSender:
             # 格式化时间
             time_str = news_item.publish_time.strftime('%m-%d %H:%M') if news_item.publish_time else ''
             
-            # 预定义按钮HTML，避免f-string中的反斜杠问题
-            summary_button = '<button class="expand-btn" onclick="toggleContent(this, \'summary\')">展开</button>' if len(result.summary) > 150 else ''
-            content_button = '<button class="expand-btn" onclick="toggleContent(this, \'content\')">展开</button>' if len(news_item.content) > 200 else ''
+            # 移除展开按钮，确保内容完整显示
             
             html_content += f"""
                 <div class="news-item {impact_class}">
@@ -794,10 +750,9 @@ class EmailSender:
                     </div>
                     <div class="news-summary">
                         <strong>AI分析:</strong>
-                        <div class="summary-content summary-{'short' if len(result.summary) > 150 else 'full'}">
+                        <div class="summary-content">
                             {result.summary}
                         </div>
-                        {summary_button}
                     </div>
                     {f'''
                     <div class="deep-analysis">
@@ -808,10 +763,9 @@ class EmailSender:
                     ''' if has_deep_analysis else ''}
                     <div class="news-content">
                         <strong>新闻内容:</strong>
-                        <div class="expandable-content content-{'short' if len(news_item.content) > 200 else 'full'}">
+                        <div class="news-content">
                             {news_item.content}
                         </div>
-                        {content_button}
                     </div>
                 </div>
 """
