@@ -639,7 +639,7 @@ class EmailSender:
         <div class="section">
             <h3>🔥 高影响新闻 ({len(high_impact_results)}条)</h3>
 """
-            for result in high_impact_results[:5]:  # 只显示前5条
+            for result in high_impact_results:
                 news_item = news_details.get(result.news_id)
                 if not news_item:
                     continue

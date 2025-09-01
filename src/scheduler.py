@@ -1331,7 +1331,7 @@ class TaskScheduler:
             </div>
         """
         
-        for news in news_list[:10]:  # 最多显示10条
+        for news in news_list:
             # 确定重要性等级
             if news.importance_score >= 70:
                 importance_class = "importance-high"
@@ -1354,11 +1354,12 @@ class TaskScheduler:
                     <span style="margin-left: 10px;">来源: {news.source}</span>
                 </p>
                 <div class="summary">
-                    <strong>摘要:</strong> {news.content[:200]}...
+                    <strong>摘要:</strong> {news.content}
                 </div>
                 <div class="factors">
                     <strong>关键因素:</strong> {news.importance_factors if hasattr(news, 'importance_factors') and news.importance_factors else '暂无'}
                 </div>
+                {f'''<div class="deep-analysis"><h5>🔍 深度分析报告</h5><div>{getattr(news, 'deep_analysis_report', '')}</div>{f'<div class="search-keywords">搜索关键词: {" ".join([f"<span>{kw}</span>" for kw in getattr(news, 'search_keywords', [])])}</div>' if getattr(news, 'search_keywords', []) else ''}</div>''' if getattr(news, 'deep_analysis_report', '') else ''}
             </div>
             """
         
@@ -1436,14 +1437,15 @@ class TaskScheduler:
                 <div class="news-section">
                     <h2 class="section-title">🔴 高重要性新闻</h2>
             """
-            for news in high_news[:10]:
+            for news in high_news:
                 html += f"""
                     <div class="news-item">
                         <div class="news-title">
                             {news.title}
                             <span class="importance importance-high">{news.importance_score}分</span>
                         </div>
-                        <div class="summary">{news.content[:150]}...</div>
+                        <div class="summary">{news.content}</div>
+                        {f'''<div class="deep-analysis"><h5>🔍 深度分析报告</h5><div>{getattr(news, 'deep_analysis_report', '')}</div>{f'<div class="search-keywords">搜索关键词: {" ".join([f"<span>{kw}</span>" for kw in getattr(news, 'search_keywords', [])])}</div>' if getattr(news, 'search_keywords', []) else ''}</div>''' if getattr(news, 'deep_analysis_report', '') else ''}
                     </div>
                 """
             html += "</div>"
@@ -1455,14 +1457,15 @@ class TaskScheduler:
                 <div class="news-section">
                     <h2 class="section-title">🟡 中等重要性新闻</h2>
             """
-            for news in medium_news[:10]:
+            for news in medium_news:
                 html += f"""
                     <div class="news-item">
                         <div class="news-title">
                             {news.title}
                             <span class="importance importance-medium">{news.importance_score}分</span>
                         </div>
-                        <div class="summary">{news.content[:150]}...</div>
+                        <div class="summary">{news.content}</div>
+                        {f'''<div class="deep-analysis"><h5>🔍 深度分析报告</h5><div>{getattr(news, 'deep_analysis_report', '')}</div>{f'<div class="search-keywords">搜索关键词: {" ".join([f"<span>{kw}</span>" for kw in getattr(news, 'search_keywords', [])])}</div>' if getattr(news, 'search_keywords', []) else ''}</div>''' if getattr(news, 'deep_analysis_report', '') else ''}
                     </div>
                 """
             html += "</div>"
