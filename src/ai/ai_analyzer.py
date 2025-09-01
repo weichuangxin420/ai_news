@@ -195,12 +195,12 @@ class AIAnalyzer:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                response = self._call_ai_api(prompt)
-                result = self._parse_analysis_response(news_item.id, response)
-                self.stats["analyzed"] += 1
-                logger.debug(f"新闻分析完成: {news_item.title[:50]}...")
-                return result
-                
+        response = self._call_ai_api(prompt)
+        result = self._parse_analysis_response(news_item.id, response)
+        self.stats["analyzed"] += 1
+        logger.debug(f"新闻分析完成: {news_item.title[:50]}...")
+        return result
+
             except Exception as e:
                 # 检查是否是HTTP错误（状态码不是200）
                 is_http_error = False
@@ -391,7 +391,7 @@ class AIAnalyzer:
                 logger.error(f"   错误代码: {e.code}")
                 
             raise
-    
+
     def _call_ai_api_with_fallback(self, prompt: str) -> str:
         """
         使用备用客户端调用AI API
